@@ -1,0 +1,13 @@
+[package]
+name = "thalia"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+path = "src/main.rs"
+name = "thalia"
+
+[dependencies]
