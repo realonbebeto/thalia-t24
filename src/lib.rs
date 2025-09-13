@@ -12,6 +12,7 @@ pub mod ledger;
 pub mod loan;
 pub mod logging;
 pub mod notification;
+pub mod openapi_docs;
 pub mod payment;
 pub mod reporting;
 pub mod startup;
