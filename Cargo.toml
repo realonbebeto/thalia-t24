@@ -12,7 +12,7 @@ name = "thalia"
 
 [dependencies]
 actix-web = "4.11.0"
-anyhow = "1.0.99"
+anyhow = "1.0.100"
 error-stack = { version = "0.6.0", features = ["spantrace", "serde", "anyhow"] }
 tracing-actix-web = "0.7.19"
 sqlx = { version = "0.8.6", default-features = false, features = [
@@ -24,7 +24,7 @@ sqlx = { version = "0.8.6", default-features = false, features = [
     "migrate",
 ] }
 envconfig = "0.11.0"
-serde = { version = "1.0.219", features = ["derive"] }
+serde = { version = "1.0.225", features = ["derive"] }
 tracing-log = "0.2"
 tracing = { version = "0.1.41", features = ["log"] }
 strum = { version = "0.27.2", features = ["derive"] }
@@ -37,3 +37,25 @@ tracing-bunyan-formatter = "0.3.10"
 tokio = { version = "1.47.1", features = ["macros", "rt-multi-thread"] }
 actix-session = { version = "0.11.0", features = ["redis-session-rustls"] }
 uuid = { version = "1.18.1", features = ["v7", "serde"] }
+utoipa = { version = "5.4.0", features = ["actix_extras", "chrono", "uuid"] }
+unicode-segmentation = "1.12.0"
+validator = "0.20.0"
+rand = { version = "0.9.2", features = ["std_rng"] }
+thiserror = "2.0.16"
+itertools = "0.14.0"
+chrono = { version = "0.4.42", features = ["serde"] }
+utoipa-swagger-ui = { version = "9.0.2", features = ["actix-web"] }
+isocountry = "0.3.2"
+iso_currency = { version = "0.5.3", features = [
+    "with-serde",
+    "with-sqlx-postgres",
+] }
+jsonwebtoken = "9.3.1"
+getset = "0.1.6"
+actix-web-flash-messages = { version = "0.5.0", features = ["cookies"] }
+
+[dev-dependencies]
+claims = "0.8.0"
+fake = "4.4.0"
+quickcheck = "1.0.3"
+quickcheck_macros = "1.1.0"
