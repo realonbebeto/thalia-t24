@@ -22,11 +22,15 @@ fn report_exit(task_name: &str, outcome: Result<Result<(), impl Debug + Display>
 
 #[actix_web::main]
 async fn main() -> anyhow::Result<()> {
-    let subscriber = get_tracing_subscriber("thalia-t24".into(), "info".into(), std::io::stdout);
-    init_tracing_subscriber(subscriber);
-
     let config = get_config().expect("Failed to read app configs");
     let config = Arc::new(config);
+
+    let subscriber = get_tracing_subscriber(
+        config.bunyan_formatting_name.clone(),
+        config.env_filter.clone(),
+        std::io::stdout,
+    );
+    init_tracing_subscriber(subscriber);
 
     let app = Application::build(&config.clone()).await?;
     let app_task = tokio::spawn(app.run_until_stopped());

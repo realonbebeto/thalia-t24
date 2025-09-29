@@ -3,36 +3,73 @@ use actix_web::FromRequest;
 use sqlx::types::Uuid;
 use std::future::{Ready, ready};
 
-pub struct TypedSession(Session);
+pub struct StaffSession(Session);
 
-impl TypedSession {
+pub struct CustomerSession(Session);
+
+pub trait SessionState {
     const ID_KEY: &'static str = "id";
 
-    pub fn renew(&self) {
-        self.0.renew();
+    fn value(&self) -> Session;
+    fn from_session(session: Session) -> Self;
+
+    fn renew(&self) {
+        self.value().renew();
     }
 
-    pub fn insert_sesh_id(&self, id: Uuid) -> Result<(), SessionInsertError> {
-        self.0.insert(Self::ID_KEY, id)
+    fn insert_sesh_id(&self, id: Uuid) -> Result<(), SessionInsertError> {
+        self.value().insert(Self::ID_KEY, id)
     }
 
-    pub fn get_sesh_id(&self) -> Result<Option<Uuid>, SessionGetError> {
-        self.0.get(Self::ID_KEY)
+    fn get_sesh_id(&self) -> Result<Option<Uuid>, SessionGetError> {
+        self.value().get(Self::ID_KEY)
     }
 
-    pub fn log_out(self) {
-        self.0.purge();
+    fn log_out(&self) {
+        self.value().purge();
     }
 }
 
-impl FromRequest for TypedSession {
+impl SessionState for StaffSession {
+    fn value(&self) -> Session {
+        self.0.clone()
+    }
+
+    fn from_session(session: Session) -> Self {
+        StaffSession(session)
+    }
+}
+
+impl SessionState for CustomerSession {
+    fn value(&self) -> Session {
+        self.0.clone()
+    }
+
+    fn from_session(session: Session) -> Self {
+        CustomerSession(session)
+    }
+}
+
+impl FromRequest for CustomerSession {
     type Error = <Session as FromRequest>::Error;
-    type Future = Ready<Result<TypedSession, Self::Error>>;
+    type Future = Ready<Result<CustomerSession, Self::Error>>;
 
     fn from_request(
         req: &actix_web::HttpRequest,
         _payload: &mut actix_web::dev::Payload,
     ) -> Self::Future {
-        ready(Ok(TypedSession(req.get_session())))
+        ready(Ok(CustomerSession::from_session(req.get_session())))
+    }
+}
+
+impl FromRequest for StaffSession {
+    type Error = <Session as FromRequest>::Error;
+    type Future = Ready<Result<StaffSession, Self::Error>>;
+
+    fn from_request(
+        req: &actix_web::HttpRequest,
+        _payload: &mut actix_web::dev::Payload,
+    ) -> Self::Future {
+        ready(Ok(StaffSession::from_session(req.get_session())))
     }
 }

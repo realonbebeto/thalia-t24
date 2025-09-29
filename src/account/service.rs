@@ -26,6 +26,7 @@ fn generate_iban(country_code: &CountryCode) -> String {
 }
 
 // Create account
+#[tracing::instrument("Create user account", skip(pool))]
 pub async fn create_user_account(
     pool: &PgPool,
     user_id: Uuid,

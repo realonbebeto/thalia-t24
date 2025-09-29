@@ -5,6 +5,7 @@ use error_stack::{Report, ResultExt};
 use sqlx::{PgPool, Postgres, Row, Transaction};
 use uuid::Uuid;
 
+#[tracing::instrument("Inserting accounts details on creation of user account", skip(tx))]
 pub async fn db_create_user_account(
     tx: &mut Transaction<'_, Postgres>,
     user_account: &UserAccount,
@@ -25,6 +26,7 @@ pub async fn db_create_user_account(
     Ok(())
 }
 
+#[tracing::instrument("Fetching chart account id by id", skip(pool))]
 pub async fn db_get_coa_id_by_account_id(
     pool: &PgPool,
     account_id: Uuid,
@@ -47,6 +49,7 @@ pub async fn db_get_coa_id_by_account_id(
     }
 }
 
+#[tracing::instrument("Fetching account balance by id", skip(pool))]
 pub async fn db_get_balance_by_user_account_id(
     pool: &PgPool,
     account_id: Uuid,
@@ -73,6 +76,7 @@ pub async fn db_get_balance_by_user_account_id(
     }
 }
 
+#[tracing::instrument("Initialize account balance cache", skip(tx))]
 pub async fn db_start_account_balance(
     tx: &mut Transaction<'_, Postgres>,
     account_id: Uuid,
@@ -89,6 +93,7 @@ pub async fn db_start_account_balance(
     Ok(())
 }
 
+#[tracing::instrument("Update account balance cache", skip(tx))]
 pub async fn db_update_account_balance(
     tx: &mut Transaction<'_, Postgres>,
     account_id: Uuid,
@@ -109,6 +114,7 @@ pub async fn db_update_account_balance(
     Ok(())
 }
 
+#[tracing::instrument("Calculate account balance", skip(tx))]
 pub async fn db_calculate_account_balance(
     tx: &mut Transaction<'_, Postgres>,
     account_id: Uuid,

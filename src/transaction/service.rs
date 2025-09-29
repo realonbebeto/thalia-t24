@@ -25,6 +25,7 @@ pub enum NextAction {
     SavedTRResponse(HttpResponse),
 }
 
+#[tracing::instrument("Try Processing Transaction")]
 pub async fn try_transaction_process(
     pool: &PgPool,
     transaction_ref: &str,
@@ -55,6 +56,7 @@ pub async fn try_transaction_process(
     }
 }
 
+#[tracing::instrument("Money Deposit")]
 pub async fn deposit_entry(
     tx: &mut Transaction<'_, Postgres>,
     user_account_id: Uuid,
@@ -108,6 +110,7 @@ pub async fn deposit_entry(
     Ok(cash_response)
 }
 
+#[tracing::instrument("Persist Transaction Response")]
 pub async fn persist_transaction_response(
     transaction: &mut Transaction<'_, Postgres>,
     account_id: Uuid,

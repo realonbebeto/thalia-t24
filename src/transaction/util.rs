@@ -7,6 +7,7 @@ use error_stack::Report;
 #[error("Bad Body: {0}")]
 pub struct BytesConvertError(pub String);
 
+#[tracing::instrument("Convert response for saving to db")]
 pub async fn response_to_tx_idempotent(
     account_id: uuid::Uuid,
     amount: f64,

@@ -5,6 +5,7 @@ CREATE TABLE tuser (
     "first_name" VARCHAR(64),
     "last_name" VARCHAR(64),
     "username" TEXT NOT NULL UNIQUE,
+    "password" TEXT NOT NULL,
     "date_of_birth" DATE NOT NULL,
     "email" TEXT NOT NULL UNIQUE,
     "is_active" BOOLEAN NOT NULL,

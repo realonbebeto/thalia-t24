@@ -8,6 +8,7 @@ use error_stack::{Report, ResultExt};
 use sqlx::{PgPool, Postgres, Transaction};
 use uuid::Uuid;
 
+#[tracing::instrument("Initialize transaction response in db")]
 pub async fn db_start_tx_idempotent_record(
     tx: &mut Transaction<'_, Postgres>,
     account_id: Uuid,
@@ -32,6 +33,7 @@ pub async fn db_start_tx_idempotent_record(
     Ok(n_inserted_rows)
 }
 
+#[tracing::instrument("Save transaction response in db")]
 pub async fn db_save_tx_response(
     tx: &mut Transaction<'_, Postgres>,
     transaction_res: TransactionIdempotent,
@@ -58,6 +60,7 @@ pub async fn db_save_tx_response(
     Ok(())
 }
 
+#[tracing::instrument("Fetch transaction response from db")]
 pub async fn db_get_saved_tx_response(
     pool: &PgPool,
     account_id: Uuid,

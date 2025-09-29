@@ -4,6 +4,7 @@ use error_stack::{Report, ResultExt};
 use sqlx::{PgPool, Postgres, Row, Transaction};
 use uuid::Uuid;
 
+#[tracing::instrument("Insert chart account to db", skip(pool))]
 pub async fn db_create_chart_account(
     pool: &PgPool,
     coa: &ChartAccount,
@@ -25,6 +26,7 @@ pub async fn db_create_chart_account(
     Ok(())
 }
 
+#[tracing::instrument("Fetch chart account id by type from db", skip(tx))]
 pub async fn db_get_coa_id_by_coa_type(
     tx: &mut Transaction<'_, Postgres>,
     coa_type: CoaType,
@@ -51,6 +53,7 @@ pub async fn db_get_coa_id_by_coa_type(
     }
 }
 
+#[tracing::instrument("Insert account type in db", skip(pool, acc_type))]
 pub async fn db_create_account_type(
     pool: &PgPool,
     acc_type: &CustomerAccountType,

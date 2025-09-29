@@ -4,6 +4,7 @@ use crate::ledger::schemas::{JournalEntryLine, JournalIdRequest, JournalRequest}
 use error_stack::{Report, ResultExt};
 use sqlx::{PgPool, Postgres, QueryBuilder, Transaction};
 
+#[tracing::instrument("Fetch journal entry from db")]
 pub async fn db_get_journal_entry(
     pool: &PgPool,
     query: &JournalRequest,
@@ -51,6 +52,7 @@ pub async fn db_get_journal_entry(
     Ok(result)
 }
 
+#[tracing::instrument("Fetch journal entry by id from db")]
 pub async fn db_get_journal_entry_by_id(
     pool: &PgPool,
     query: &JournalIdRequest,
@@ -78,6 +80,7 @@ pub async fn db_add_ledger_journal_entry(
     Ok(())
 }
 
+#[tracing::instrument("Insert journal lines in db", skip(tx, journal_line))]
 pub async fn db_add_ledger_journal_line(
     tx: &mut Transaction<'_, Postgres>,
     journal_line: IntoJournalLine,

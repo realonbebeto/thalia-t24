@@ -3,7 +3,7 @@ use sqlx::ConnectOptions;
 use sqlx::postgres::PgConnectOptions;
 use sqlx::postgres::PgSslMode;
 
-#[derive(serde::Deserialize, Envconfig)]
+#[derive(serde::Deserialize, Envconfig, Debug)]
 pub struct DatabaseConfig {
     #[envconfig(from = "DB_USERNAME")]
     pub db_username: String,
@@ -42,7 +42,7 @@ impl DatabaseConfig {
     }
 }
 
-#[derive(serde::Deserialize)]
+#[derive(serde::Deserialize, Debug)]
 pub enum Environment {
     Local,
     Production,
@@ -63,7 +63,7 @@ impl std::str::FromStr for Environment {
     }
 }
 
-#[derive(serde::Deserialize, Envconfig)]
+#[derive(serde::Deserialize, Envconfig, Debug)]
 pub struct AppConfig {
     #[envconfig(from = "APP_PORT")]
     pub port: u16,
@@ -75,13 +75,21 @@ pub struct AppConfig {
     pub app_uri: String,
     #[envconfig(from = "SECRET_KEY")]
     pub secret_key: String,
-    #[envconfig(from = "IDEMPOTENCY_EXPIRATION")]
-    pub idempotency_expiration: u64,
-    #[envconfig(from = "ACCESS_TOKEN_EXPIRE_MINUTES")]
-    pub access_token_expire_minutes: u64,
+    #[envconfig(from = "DEFAULT_PASSWORD")]
+    pub default_password: String,
 }
 
-#[derive(serde::Deserialize, Envconfig)]
+#[derive(serde::Deserialize, Envconfig, Debug, Clone)]
+pub struct Expiration {
+    #[envconfig(from = "IDEMPOTENCY_EXPIRATION_SECS")]
+    pub idempotency_expiration_secs: u64,
+    #[envconfig(from = "ACCESS_TOKEN_EXPIRE_SECS")]
+    pub access_token_expire_secs: u64,
+    #[envconfig(from = "REFRESH_TOKEN_EXPIRE_SECS")]
+    pub refresh_token_expire_secs: u64,
+}
+
+#[derive(serde::Deserialize, Envconfig, Debug)]
 pub struct Config {
     #[envconfig(nested)]
     pub database: DatabaseConfig,
@@ -89,6 +97,12 @@ pub struct Config {
     pub application: AppConfig,
     #[envconfig(from = "REDIS_URI")]
     pub redis_uri: String,
+    #[envconfig(from = "ENV_FILTER")]
+    pub env_filter: String,
+    #[envconfig(from = "BUNYAN_FORMATTING_NAME")]
+    pub bunyan_formatting_name: String,
+    #[envconfig(nested)]
+    pub expiration: Expiration,
 }
 
 pub fn get_config() -> Result<Config, envconfig::Error> {

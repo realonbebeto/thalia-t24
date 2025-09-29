@@ -6,6 +6,7 @@ pub struct UserCreateRequest {
     pub last_name: String,
     pub date_of_birth: chrono::NaiveDate,
     pub username: String,
+    pub password: String,
     pub email: String,
     pub access_role: String,
 }

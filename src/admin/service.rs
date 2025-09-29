@@ -12,6 +12,7 @@ pub fn generate_code() -> String {
     u.to_string()
 }
 
+#[tracing::instrument("Create account type", skip(pool))]
 pub async fn account_type_creation(
     pool: &PgPool,
     request: AccountTypeRequest,
@@ -29,6 +30,7 @@ pub async fn account_type_creation(
     Ok(())
 }
 
+#[tracing::instrument("Create chart account", skip(pool))]
 pub async fn chart_account_creation(
     pool: &PgPool,
     request: ChartAccountRequest,

@@ -1,5 +1,5 @@
 use crate::base::error::ValidationError;
-use crate::base::{Email, Name, Username};
+use crate::base::{Email, Name, Password, Username};
 use crate::user::schemas::UserCreateRequest;
 use error_stack::Report;
 use sqlx::types::chrono;
@@ -30,6 +30,7 @@ pub struct User {
     pub first_name: Name,
     pub last_name: Name,
     pub username: Username,
+    pub password: Password,
     pub email: Email,
     pub date_of_birth: chrono::NaiveDate,
     pub is_active: bool,
@@ -45,6 +46,7 @@ impl TryFrom<UserCreateRequest> for User {
         let last_name = Name::parse(value.last_name)?;
         let email = Email::parse(value.email)?;
         let username = Username::parse(value.username)?;
+        let password = Password::parse(value.password)?;
         let is_active = false;
         let is_verified = false;
         let access_role: AccessRole = value.access_role.into();
@@ -55,6 +57,7 @@ impl TryFrom<UserCreateRequest> for User {
             first_name,
             last_name,
             username,
+            password,
             email,
             date_of_birth,
             is_active,

@@ -8,13 +8,15 @@ pub async fn db_create_user(
     user: &User,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
-        "INSERT INTO tuser(id, first_name, last_name, username, email, is_active, access_role)
+        "INSERT INTO tuser(id, first_name, last_name, username, password, date_of_birth, email, is_active, access_role)
         VALUES($1, $2, $3, $4, $5, $6, $7)",
     )
     .bind(user.id)
     .bind(user.first_name.as_ref())
     .bind(user.last_name.as_ref())
     .bind(user.username.as_ref())
+    .bind(user.password.phash_as_ref())
+    .bind(user.date_of_birth)
     .bind(user.email.as_ref())
     .bind(user.is_active)
     .bind(&user.access_role)

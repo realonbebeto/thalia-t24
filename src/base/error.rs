@@ -4,12 +4,16 @@ use error_stack::Report;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ValidationError {
-    #[error("Email is not a valid")]
+    #[error("Email is not valid")]
     InvalidEmail,
-    #[error("Username is not a valid")]
+    #[error("Username is not valid")]
     InvalidUsername,
     #[error("Name is not valid")]
     InvalidName,
+    #[error("Invalid password")]
+    InvalidPassword,
+    #[error("Missing credential(s)")]
+    MissingCredentials,
 }
 
 #[derive(Debug, thiserror::Error, Clone)]
@@ -24,6 +28,8 @@ pub enum BaseError {
     ServiceUnavailable,
     #[error("Conflict: {message}")]
     AlreadyExists { message: String },
+    #[error("Invalid Credentials: {message}")]
+    InvalidCredentials { message: String },
 }
 
 impl BaseError {
@@ -52,6 +58,12 @@ impl BaseError {
             message: message.into(),
         }
     }
+
+    pub fn invalid_credentials(message: impl Into<String>) -> Self {
+        Self::InvalidCredentials {
+            message: message.into(),
+        }
+    }
 }
 
 impl actix_web::ResponseError for BaseError {
@@ -72,9 +84,12 @@ impl actix_web::ResponseError for BaseError {
             BaseError::AlreadyExists { message } => {
                 (actix_web::http::StatusCode::CONFLICT, message)
             }
+            BaseError::InvalidCredentials { message } => {
+                (actix_web::http::StatusCode::UNAUTHORIZED, message)
+            }
         };
 
-        HttpResponse::build(status).json(StdResponse { message })
+        HttpResponse::build(status).json(StdResponse::from(message))
     }
 }
 
@@ -113,6 +128,7 @@ pub trait ErrorExt<T> {
     fn to_notfound(self) -> Result<T>;
     fn to_serviceunavailable(self) -> Result<T>;
     fn to_alreadyexists(self) -> Result<T>;
+    fn to_invalidcredentials(self) -> Result<T>;
 }
 
 impl<T, E: std::fmt::Display> ErrorExt<T> for std::result::Result<T, E> {
@@ -133,6 +149,10 @@ impl<T, E: std::fmt::Display> ErrorExt<T> for std::result::Result<T, E> {
 
     fn to_alreadyexists(self) -> Result<T> {
         self.map_err(|e| BaseError::already_exists(e.to_string()))
+    }
+
+    fn to_invalidcredentials(self) -> Result<T> {
+        self.map_err(|e| BaseError::invalid_credentials(e.to_string()))
     }
 }
 
