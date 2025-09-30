@@ -18,7 +18,7 @@ impl Name {
         let contains_forbidden_chars = s.chars().any(|g| forbidden_chars.contains(&g));
 
         if is_empty_or_whitespace || is_too_long || is_too_short || contains_forbidden_chars {
-            Err(Report::new(ValidationError::InvalidName))
+            Err(Report::new(ValidationError::InvalidName).attach(format!("Failed to parse {}", s)))
         } else {
             Ok(Self(s))
         }

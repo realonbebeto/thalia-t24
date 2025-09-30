@@ -8,6 +8,7 @@ CREATE TABLE tuser (
     "password" TEXT NOT NULL,
     "date_of_birth" DATE NOT NULL,
     "email" TEXT NOT NULL UNIQUE,
+    "is_confirmed" BOOLEAN NOT NULL,
     "is_active" BOOLEAN NOT NULL,
     "is_verified" BOOLEAN NOT NULL,
     "access_role" user_role NOT NULL,

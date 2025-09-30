@@ -14,7 +14,7 @@ fi
 docker run \
     -p "6379:6379" \
     -d \
-    --name "dragonfly_$(date '+%s')" \
+    --name "thaliaD7y_$(date '+%s')" \
     --ulimit memlock=-1 \
     docker.dragonflydb.io/dragonflydb/dragonfly
 

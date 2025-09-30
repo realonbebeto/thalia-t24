@@ -1,14 +1,13 @@
-use crate::base::error::DBError;
 use crate::ledger::models::{IntoJournalLine, JournalEntry};
 use crate::ledger::schemas::{JournalEntryLine, JournalIdRequest, JournalRequest};
-use error_stack::{Report, ResultExt};
+use crate::telemetry::TraceError;
 use sqlx::{PgPool, Postgres, QueryBuilder, Transaction};
 
 #[tracing::instrument("Fetch journal entry from db")]
 pub async fn db_get_journal_entry(
     pool: &PgPool,
     query: &JournalRequest,
-) -> Result<Vec<JournalEntryLine>, Report<DBError>> {
+) -> Result<Vec<JournalEntryLine>, sqlx::Error> {
     let mut builder: QueryBuilder<Postgres> = QueryBuilder::new(
         "SELECT je.id, je.reference_id, je.description, je.created_at, jl.coa_id, jl.line_type, jl.amount_cents 
                 FROM journal_entry je
@@ -45,9 +44,7 @@ pub async fn db_get_journal_entry(
         .build_query_as::<JournalEntryLine>()
         .fetch_all(pool)
         .await
-        .change_context(DBError::DBFault {
-            message: "Error while fetching journal entries".into(),
-        })?;
+        .trace_with("Error while fetching journal entries")?;
 
     Ok(result)
 }
@@ -68,14 +65,15 @@ pub async fn db_get_journal_entry_by_id(
 pub async fn db_add_ledger_journal_entry(
     tx: &mut Transaction<'_, Postgres>,
     journal_entry: &JournalEntry,
-) -> Result<(), Report<DBError>> {
+) -> Result<(), sqlx::Error> {
     sqlx::query("INSERT INTO journal_entry(id, user_account_id, transaction_id, transaction_ref, description) VALUES($1, $2, $3)")
         .bind(journal_entry.get_id())
         .bind(journal_entry.get_user_account_id())
         .bind(journal_entry.get_transaction_id())
         .bind(journal_entry.get_description())
         .execute(&mut **tx)
-        .await.change_context(DBError::DBFault { message: "Error while inserting ledger journal entry".into() })?;
+        .await
+        .trace_with("Error while inserting ledger journal entry")?;
 
     Ok(())
 }
@@ -84,7 +82,7 @@ pub async fn db_add_ledger_journal_entry(
 pub async fn db_add_ledger_journal_line(
     tx: &mut Transaction<'_, Postgres>,
     journal_line: IntoJournalLine,
-) -> Result<(), Report<DBError>> {
+) -> Result<(), sqlx::Error> {
     sqlx::query(
         "INSERT INTO journal_line(id, journal_entry_id, coa_id, amount_cents, line_type) 
                         VALUES ($1, $2, $3, $4, $5), ($6, $7, $8, $9, $10)",
@@ -103,9 +101,7 @@ pub async fn db_add_ledger_journal_line(
     .bind(journal_line.get_credit_line().get_line_type())
     .execute(&mut **tx)
     .await
-    .change_context(DBError::DBFault {
-        message: "Error while inserting ledger journal line entry".into(),
-    })?;
+    .trace_with("Error while inserting ledger journal line entry")?;
 
     Ok(())
 }

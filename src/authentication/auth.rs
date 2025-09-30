@@ -143,7 +143,7 @@ pub fn create_activate_token(
     let claims = ActivateClaims::new(email.into(), iat, user_id, exp);
 
     let token = encode(
-        &Header::new(Algorithm::HS512),
+        &Header::new(Algorithm::HS256),
         &claims,
         &EncodingKey::from_secret(secret_key.as_ref()),
     )
@@ -159,7 +159,7 @@ pub fn validate_activate_token(
     let token_data = decode::<ActivateClaims>(
         token,
         &DecodingKey::from_secret(secret_key.as_ref()),
-        &Validation::new(Algorithm::HS512),
+        &Validation::new(Algorithm::HS256),
     )
     .change_context(TokenError::DecodeError)?;
 
@@ -192,7 +192,7 @@ pub fn create_token(
     let claims = TokenClaims::new(user_id, exp);
 
     let jwt = encode(
-        &Header::new(Algorithm::HS512),
+        &Header::new(Algorithm::HS256),
         &claims,
         &EncodingKey::from_secret(secret_key.as_ref()),
     )
@@ -212,7 +212,7 @@ pub fn validate_access_token(
     let access_token_data = decode::<TokenClaims>(
         &access_token,
         &DecodingKey::from_secret(secret_key.as_ref()),
-        &Validation::new(Algorithm::HS512),
+        &Validation::new(Algorithm::HS256),
     )
     .change_context(TokenError::DecodeError)?;
 
@@ -238,7 +238,7 @@ pub fn validate_refresh_token(
     let refresh_token_data = decode::<TokenClaims>(
         refresh_token,
         &DecodingKey::from_secret(secret_key.as_ref()),
-        &Validation::new(Algorithm::HS512),
+        &Validation::new(Algorithm::HS256),
     )
     .change_context(TokenError::DecodeError)?;
 

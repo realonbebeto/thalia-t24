@@ -1,6 +1,7 @@
 use crate::account::repo::{db_calculate_account_balance, db_update_account_balance};
 use crate::admin::{models::CoaType, repo::db_get_coa_id_by_coa_type};
-use crate::base::error::{BaseError, DBError, ErrorExt};
+use crate::base::error::{BaseError, ErrorExt};
+use crate::telemetry::TraceError;
 use crate::transaction::repo::db_save_tx_response;
 use crate::transaction::repo::{db_get_saved_tx_response, db_start_tx_idempotent_record};
 use crate::transaction::schemas::{CashDepositRequest, CashResponse};
@@ -35,9 +36,7 @@ pub async fn try_transaction_process(
     let mut tx = pool
         .begin()
         .await
-        .change_context(DBError::DBFault {
-            message: "Error establishing postgres transaction".into(),
-        })
+        .trace_with("Error establishing postgres transaction")
         .change_context(BaseError::Internal)?;
 
     let n_inserted_rows =

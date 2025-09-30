@@ -1,7 +1,7 @@
+use crate::account::models::UserAccount;
 use crate::account::schemas::UserAccountBalance;
 use crate::ledger::models::LineType;
-use crate::{account::models::UserAccount, base::error::DBError};
-use error_stack::{Report, ResultExt};
+use crate::telemetry::TraceError;
 use sqlx::{PgPool, Postgres, Row, Transaction};
 use uuid::Uuid;
 
@@ -9,7 +9,7 @@ use uuid::Uuid;
 pub async fn db_create_user_account(
     tx: &mut Transaction<'_, Postgres>,
     user_account: &UserAccount,
-) -> Result<(), Report<DBError>> {
+) -> Result<(), sqlx::Error> {
     sqlx::query("INSERT INTO user_account(id, user_id, account_number, iban, account_type, coa_id, branch_id, currency, status) 
     VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9)")
     .bind(user_account.id)
@@ -21,7 +21,7 @@ pub async fn db_create_user_account(
     .bind(user_account.branch_id)
     .bind(&user_account.currency)
     .bind(&user_account.status)
-    .execute(&mut **tx).await.change_context(DBError::DBFault { message: "Error while creating user account".into() })?;
+    .execute(&mut **tx).await.trace_with("Error while inserting account details")?;
 
     Ok(())
 }
@@ -30,22 +30,20 @@ pub async fn db_create_user_account(
 pub async fn db_get_coa_id_by_account_id(
     pool: &PgPool,
     account_id: Uuid,
-) -> Result<Uuid, Report<DBError>> {
+) -> Result<Uuid, sqlx::Error> {
     let result = sqlx::query("SELECT coa_id FROM user_account WHERE id=$1")
         .bind(account_id)
         .fetch_optional(pool)
         .await
-        .change_context(DBError::DBFault {
-            message: "Error while fetching user account coa id".into(),
-        })?;
+        .trace_with("Error while fetching user account coa id")?;
 
     match result {
         Some(r) => {
             let r = r.get::<Uuid, _>("coa_id");
             Ok(r)
         }
-        None => Err(Report::new(DBError::NotFound))
-            .attach(format!("coa_id for account id: {} not found", account_id)),
+        None => Err(sqlx::Error::RowNotFound)
+            .trace_with(&format!("coa_id for account id: {} not found", account_id)),
     }
 }
 
@@ -53,14 +51,12 @@ pub async fn db_get_coa_id_by_account_id(
 pub async fn db_get_balance_by_user_account_id(
     pool: &PgPool,
     account_id: Uuid,
-) -> Result<UserAccountBalance, Report<DBError>> {
+) -> Result<UserAccountBalance, sqlx::Error> {
     let result = sqlx::query("SELECT amount_cents FROM account_balance WHERE account_id=$1")
         .bind(account_id)
         .fetch_optional(pool)
         .await
-        .change_context(DBError::DBFault {
-            message: "Error fetching account balance".into(),
-        })?;
+        .trace_with("Error fetching account balance")?;
 
     match result {
         Some(balance) => {
@@ -69,10 +65,10 @@ pub async fn db_get_balance_by_user_account_id(
                 UserAccountBalance::new(account_id, balance, "USD".into(), chrono::Utc::now());
             Ok(acc_balance)
         }
-        None => Err(Report::new(DBError::NotFound).attach(format!(
+        None => Err(sqlx::Error::RowNotFound).trace_with(&format!(
             "Account balance not found for account id: {}",
             account_id
-        ))),
+        )),
     }
 }
 
@@ -80,15 +76,13 @@ pub async fn db_get_balance_by_user_account_id(
 pub async fn db_start_account_balance(
     tx: &mut Transaction<'_, Postgres>,
     account_id: Uuid,
-) -> Result<(), Report<DBError>> {
+) -> Result<(), sqlx::Error> {
     sqlx::query("INSERT INTO account_balance(account_id, amount_cents) VALUES($1, $2)")
         .bind(account_id)
         .bind(0)
         .execute(&mut **tx)
         .await
-        .change_context(DBError::DBFault {
-            message: "Error while sarting account balance cache record".into(),
-        })?;
+        .trace_with("Error while sarting account balance cache record")?;
 
     Ok(())
 }
@@ -98,7 +92,7 @@ pub async fn db_update_account_balance(
     tx: &mut Transaction<'_, Postgres>,
     account_id: Uuid,
     amount: i64,
-) -> Result<(), Report<DBError>> {
+) -> Result<(), sqlx::Error> {
     sqlx::query(
         "UPDATE account_balance
     SET amount_cents WHERE account_id=$1",
@@ -107,9 +101,7 @@ pub async fn db_update_account_balance(
     .bind(account_id)
     .execute(&mut **tx)
     .await
-    .change_context(DBError::DBFault {
-        message: "Error while updating account balance".into(),
-    })?;
+    .trace_with("Error while updating account balance")?;
 
     Ok(())
 }
@@ -119,7 +111,7 @@ pub async fn db_calculate_account_balance(
     tx: &mut Transaction<'_, Postgres>,
     account_id: Uuid,
     coa_id: Uuid,
-) -> Result<i64, Report<DBError>> {
+) -> Result<i64, sqlx::Error> {
     let result = sqlx::query(
         "SELECT SUM(COALESCE(CASE jl.line_type 
                         WHEN $1 THEN jl.amount_cents
@@ -135,9 +127,7 @@ pub async fn db_calculate_account_balance(
     .bind(coa_id)
     .fetch_one(&mut **tx)
     .await
-    .change_context(DBError::DBFault {
-        message: "Error while calculating user account balance".into(),
-    })?;
+    .trace_with("Error while calculating user account balance")?;
 
     let result: i64 = result.get("balance_cents");
 

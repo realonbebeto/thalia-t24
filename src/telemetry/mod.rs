@@ -38,3 +38,22 @@ where
 
     tokio::task::spawn_blocking(move || current_span.in_scope(f))
 }
+
+pub trait TraceError<T, E> {
+    fn trace_with(self, context: &str) -> Result<T, E>;
+}
+
+impl<T, E> TraceError<T, E> for std::result::Result<T, E>
+where
+    E: std::error::Error + Send + Sync + 'static,
+{
+    fn trace_with(self, context: &str) -> Result<T, E> {
+        self.map_err(|e| {
+            let span = tracing::Span::current();
+            span.in_scope(|| {
+                tracing::error!(error=%e, error_debug=?e, context=context);
+            });
+            e
+        })
+    }
+}

@@ -1,9 +1,10 @@
 use crate::account::models::{AccountType, UserAccount, UserAccountStatus};
 use crate::account::repo::{db_create_user_account, db_start_account_balance};
 use crate::admin::{models::CoaType, repo::db_get_coa_id_by_coa_type};
-use crate::base::error::{BaseError, DBError};
+use crate::base::error::BaseError;
 use crate::ledger::models::{CreditLine, DebitLine, IntoJournalLine, JournalEntry, LineType};
 use crate::ledger::repo::{db_add_ledger_journal_entry, db_add_ledger_journal_line};
+use crate::telemetry::TraceError;
 use crate::transaction::service::generate_transaction_id;
 use error_stack::{Report, ResultExt};
 use iso_currency::Country;
@@ -38,9 +39,7 @@ pub async fn create_user_account(
     let mut tx = pool
         .begin()
         .await
-        .change_context(DBError::DBFault {
-            message: "Error establishing postgres transaction".into(),
-        })
+        .trace_with("Error establishing postgres transaction")
         .change_context(BaseError::Internal)?;
 
     let user_account = UserAccount {
@@ -93,9 +92,7 @@ pub async fn create_user_account(
 
     tx.commit()
         .await
-        .change_context(DBError::DBFault {
-            message: "Error while committing user account creation transaction".into(),
-        })
+        .trace_with("Error while committing user account creation transaction")
         .change_context(BaseError::Internal)?;
 
     Ok(())

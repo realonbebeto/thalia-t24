@@ -1,10 +1,9 @@
+use crate::telemetry::TraceError;
 use crate::{
-    base::error::DBError,
     transaction::models::{HeaderPairRecord, TransactionIdempotent},
     transaction::schemas::TRResponse,
 };
 use actix_web::{HttpResponse, http::StatusCode};
-use error_stack::{Report, ResultExt};
 use sqlx::{PgPool, Postgres, Transaction};
 use uuid::Uuid;
 
@@ -14,7 +13,7 @@ pub async fn db_start_tx_idempotent_record(
     account_id: Uuid,
     transaction_ref: &str,
     amount: f64,
-) -> Result<u64, Report<DBError>> {
+) -> Result<u64, sqlx::Error> {
     let amount_cents = (amount * 100.0) as i64;
     let n_inserted_rows = sqlx::query(
         "INSERT INTO transaction_idempotent (account_id, transaction_ref, amount_cents)
@@ -25,9 +24,7 @@ pub async fn db_start_tx_idempotent_record(
     .bind(amount_cents)
     .execute(&mut **tx)
     .await
-    .change_context(DBError::DBFault {
-        message: "Error while inserting into transaction_idempotent".into(),
-    })?
+    .trace_with("Error while inserting into transaction_idempotent")?
     .rows_affected();
 
     Ok(n_inserted_rows)
@@ -37,7 +34,7 @@ pub async fn db_start_tx_idempotent_record(
 pub async fn db_save_tx_response(
     tx: &mut Transaction<'_, Postgres>,
     transaction_res: TransactionIdempotent,
-) -> Result<(), Report<DBError>> {
+) -> Result<(), sqlx::Error> {
     sqlx::query(
         "UPDATE transaction_idempotent
                     SET response_status_code=$1,
@@ -53,9 +50,7 @@ pub async fn db_save_tx_response(
     .bind(transaction_res.get_transaction_ref())
     .execute(&mut **tx)
     .await
-    .change_context(DBError::DBFault {
-        message: "Error while updating transaction idempotent response s".into(),
-    })?;
+    .trace_with("Error while updating transaction idempotent response")?;
 
     Ok(())
 }
@@ -65,7 +60,7 @@ pub async fn db_get_saved_tx_response(
     pool: &PgPool,
     account_id: Uuid,
     transaction_ref: &str,
-) -> Result<HttpResponse, Report<DBError>> {
+) -> Result<HttpResponse, sqlx::Error> {
     let saved_response = sqlx::query_as::<_, TRResponse>(
         "SELECT response_status_code, response_headers, response_body FROM transaction_idempotent
         WHERE account_id=$1
@@ -75,20 +70,18 @@ pub async fn db_get_saved_tx_response(
     .bind(transaction_ref)
     .fetch_optional(pool)
     .await
-    .change_context(DBError::DBFault {
-        message: "Error while fetching transaction response".into(),
-    })?;
+    .trace_with("Error while fetching transaction response")?;
 
     if let Some(r) = saved_response {
-        let status_code =
-            StatusCode::from_u16(r.response_status_code.unwrap().try_into().change_context(
-                DBError::DBFault {
-                    message: "Corrupted status code from DB".into(),
-                },
-            )?)
-            .change_context(DBError::DBFault {
-                message: "Error parsing integer to status code".into(),
-            })?;
+        let status_code = StatusCode::from_u16(
+            r.response_status_code
+                .unwrap()
+                .try_into()
+                .trace_with("Corrupted status code from DB")
+                .map_err(|_| sqlx::Error::Protocol("Could not convert to i16".into()))?,
+        )
+        .trace_with("Error parsing integer to status code")
+        .map_err(|_| sqlx::Error::Protocol("Could not parse i16".into()))?;
 
         let mut response = HttpResponse::build(status_code);
         for HeaderPairRecord { name, value } in r.response_headers.unwrap() {
@@ -97,9 +90,9 @@ pub async fn db_get_saved_tx_response(
 
         Ok(response.body(r.response_body.unwrap()))
     } else {
-        Err(Report::new(DBError::NotFound).attach(format!(
+        Err(sqlx::Error::RowNotFound).trace_with(&format!(
             "Saved response of account_id: {} and transaction_ref: {} not found",
             account_id, transaction_ref,
-        )))
+        ))?
     }
 }

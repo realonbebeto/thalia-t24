@@ -14,6 +14,8 @@ pub enum ValidationError {
     InvalidPassword,
     #[error("Missing credential(s)")]
     MissingCredentials,
+    #[error("Missing credential(s)")]
+    WrongAccessRole,
 }
 
 #[derive(Debug, thiserror::Error, Clone)]
@@ -115,7 +117,7 @@ impl actix_web::ResponseError for BaseError {
 
 type Result<T> = std::result::Result<T, BaseError>;
 
-// Important to convert Report<AdminError> to AppError automatically
+// Important to convert Report<BaseError> to AppError automatically
 impl From<Report<BaseError>> for BaseError {
     fn from(value: Report<BaseError>) -> Self {
         value.current_context().clone()
@@ -156,10 +158,10 @@ impl<T, E: std::fmt::Display> ErrorExt<T> for std::result::Result<T, E> {
     }
 }
 
-#[derive(Debug, thiserror::Error)]
-pub enum DBError {
-    #[error("Database Fault: {message}")]
-    DBFault { message: String },
-    #[error("Record(s) not found")]
-    NotFound,
-}
+// #[derive(Debug, thiserror::Error)]
+// pub enum DBError {
+//     #[error("Database Fault: {message}")]
+//     DBFault { message: String },
+//     #[error("Record(s) not found")]
+//     NotFound,
+// }

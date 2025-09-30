@@ -1,45 +1,58 @@
+use crate::admin::schemas::{AccountTypeRequest, ChartAccountRequest};
+use crate::admin::service::{account_type_creation, chart_account_creation};
+use crate::authentication::schemas::{Credentials, DefaultPassword, LoginRequest, SecretKey};
 use crate::authentication::{SessionState, StaffSession, validate_credentials};
+use crate::authentication::{create_activate_token, create_token, repo::db_store_token};
+use crate::base::StdResponse;
 use crate::base::error::{BaseError, ErrorExt};
 use crate::config::Expiration;
+use crate::user::models::CustomerUser;
+use crate::user::repo::{db_create_user, db_get_user};
+use crate::user::{models::StaffUser, schemas::UserCreateRequest};
 use actix_web::{HttpResponse, cookie::Cookie, http::header, web};
 use actix_web_flash_messages::FlashMessage;
 use sqlx::PgPool;
 
-use crate::admin::schemas::{AccountTypeRequest, ChartAccountRequest};
-use crate::admin::service::{account_type_creation, chart_account_creation};
-use crate::authentication::schemas::{Credentials, DefaultPassword, LoginRequest, SecretKey};
-use crate::authentication::{create_token, generate_activate_token, repo::db_store_token};
-use crate::base::StdResponse;
-use crate::user::repo::{db_create_user, db_get_user};
-use crate::user::{models::User, schemas::UserCreateRequest};
-
-#[tracing::instrument("Staff signup", skip(pool, request), fields(username=%request.username, user_email=%request.email))]
+#[tracing::instrument("Staff signup", skip(pool, request, secret_key), fields(username=%request.username, user_email=%request.email))]
 #[utoipa::path(post, path="/signup", responses((status=200, body=StdResponse, description="User created successfully"), (status=409, description="User already exists")))]
 // Signup admin accounts
 pub async fn staff_signup(
     pool: web::Data<PgPool>,
     request: web::Json<UserCreateRequest>,
+    secret_key: web::Data<SecretKey>,
+    expiry: web::Data<Expiration>,
 ) -> actix_web::Result<HttpResponse> {
-    let user: User = request.into_inner().try_into().to_badrequest()?;
+    let user: StaffUser = request.into_inner().try_into().to_badrequest()?;
+    let user = user.0;
 
+    tracing::info!("Checking if the user already exists");
     if db_get_user(&pool, user.email.as_ref())
         .await
         .to_internal()?
         .is_some()
     {
+        tracing::warn!(email = %user.email, "Attempted to create user but it already exists");
         return Ok(HttpResponse::Conflict().json(StdResponse::from("User already exists")));
     }
 
     let mut tx = pool.begin().await.to_internal()?;
 
     db_create_user(&mut tx, &user).await.to_internal()?;
+    tracing::info!("User created");
 
-    // Generate activate token
-    let activate_token = generate_activate_token();
+    let activate_token = create_activate_token(
+        user.id,
+        user.email.as_ref(),
+        expiry.into_inner().activate_token_expire_secs,
+        &secret_key.into_inner().0,
+    )
+    .to_internal()?;
 
     db_store_token(&mut tx, &activate_token, user.id, user.email.as_ref())
         .await
         .to_internal()?;
+
+    tracing::info!("User activate token generated and stored");
 
     tx.commit().await.to_internal()?;
 
@@ -48,7 +61,7 @@ pub async fn staff_signup(
     Ok(HttpResponse::Ok().json(StdResponse::from("User created successfully")))
 }
 
-#[tracing::instrument("Staff login", skip(payload, pool, session))]
+#[tracing::instrument("Staff login", skip(payload, pool, session, default_pass, secret_key))]
 #[utoipa::path(post, path="/login", responses((status=200, body=StdResponse, description="Staff login successful"), (status=401, description="Staff login unsuccessful")))]
 
 pub async fn staff_login(
@@ -118,29 +131,42 @@ pub async fn staff_login(
 pub async fn create_customer_account(
     pool: web::Data<PgPool>,
     request: web::Json<UserCreateRequest>,
+    secret_key: web::Data<SecretKey>,
+    expiry: web::Data<Expiration>,
 ) -> actix_web::Result<HttpResponse> {
-    let user: User = request.into_inner().try_into().to_badrequest()?;
+    let user: CustomerUser = request.into_inner().try_into().to_badrequest()?;
+    let user = user.0;
+
+    tracing::info!("Checking if the user already exists");
 
     if db_get_user(&pool, user.email.as_ref())
         .await
         .to_internal()?
         .is_some()
     {
+        tracing::warn!(email = %user.email, "Attempted to create user but it already exists");
         return Ok(HttpResponse::Conflict().json(StdResponse::from("User already exists")));
     }
 
     let mut tx = pool.begin().await.to_internal()?;
 
     db_create_user(&mut tx, &user).await.to_internal()?;
+    tracing::info!("User created");
 
     // Generate activate token
-    let activate_token = generate_activate_token();
+    let activate_token = create_activate_token(
+        user.id,
+        user.email.as_ref(),
+        expiry.into_inner().activate_token_expire_secs,
+        &secret_key.into_inner().0,
+    )
+    .to_internal()?;
 
     db_store_token(&mut tx, &activate_token, user.id, user.email.as_ref())
         .await
         .to_internal()?;
 
-    // Create user_account
+    tracing::info!("Activate token created");
 
     tx.commit().await.to_internal()?;
 

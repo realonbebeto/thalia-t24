@@ -4,9 +4,9 @@ use crate::account::{
     models::AccountType,
     schemas::{UserAccountBalance, UserAccountCreateRequest},
 };
-use crate::authentication::schemas::ActivateExpiryTime;
 use crate::authentication::{
     create_activate_token, create_token,
+    repo::db_store_token,
     schemas::{Credentials, DefaultPassword, LoginRequest, SecretKey},
     session_state::{CustomerSession, SessionState},
     validate_activate_token, validate_credentials,
@@ -14,8 +14,9 @@ use crate::authentication::{
 use crate::base::StdResponse;
 use crate::base::error::{BaseError, ErrorExt};
 use crate::config::Expiration;
-use crate::user::repo::{db_activate_user, db_create_user};
-use crate::user::{models::User, schemas::UserCreateRequest};
+use crate::user::models::CustomerUser;
+use crate::user::repo::{db_confirm_user, db_create_user};
+use crate::user::schemas::UserCreateRequest;
 use actix_web::{HttpResponse, cookie::Cookie, http::header, web};
 use actix_web_flash_messages::FlashMessage;
 use chrono::offset::Utc;
@@ -24,34 +25,47 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 // Create account
-#[tracing::instrument("Customer signup")]
+#[tracing::instrument("Customer signup", skip(pool, request, secret_key, expiry))]
 #[utoipa::path(post, path="/signup", responses((status=200, body=StdResponse, description="User created successfully"), (status=409, description="User already exists")))]
 pub async fn customer_signup(
     pool: web::Data<PgPool>,
     request: web::Json<UserCreateRequest>,
     secret_key: web::Data<SecretKey>,
-    expiry: web::Data<ActivateExpiryTime>,
+    expiry: web::Data<Expiration>,
 ) -> actix_web::Result<HttpResponse> {
-    let user: User = request.into_inner().try_into().to_badrequest()?;
+    let user: CustomerUser = request.into_inner().try_into().to_badrequest()?;
+    let user = user.0;
+    dbg!(1);
+
     // Check if a user is age > 18
-    let today = Utc::now().date_naive();
-    if (today - user.date_of_birth).num_days() < 18 * 365 {
+    let age_days = (Utc::now().date_naive() - user.date_of_birth).num_days();
+    if age_days < 18 * 365 {
         return Ok(HttpResponse::BadRequest().json(StdResponse::from("You need to be 18 or older to use this service. Please try again when you meet the age requirement.")));
     }
+
+    dbg!(2);
 
     let mut tx = pool.begin().await.to_internal()?;
     db_create_user(&mut tx, &user).await.to_internal()?;
 
-    tx.commit().await.to_internal()?;
+    dbg!(3);
 
     // Create activate token
-    let _token = create_activate_token(
+    let activate_token = create_activate_token(
         user.id,
         user.email.as_ref(),
-        expiry.into_inner().0,
+        expiry.into_inner().access_token_expire_secs,
         &secret_key.into_inner().0,
     )
     .to_internal()?;
+
+    db_store_token(&mut tx, &activate_token, user.id, user.email.as_ref())
+        .await
+        .to_internal()?;
+
+    tracing::info!("User activate token generated and stored");
+
+    tx.commit().await.to_internal()?;
 
     // TODO Send Activate Link
 
@@ -61,7 +75,7 @@ pub async fn customer_signup(
 // activate account
 #[tracing::instrument("Activate profile")]
 #[utoipa::path(get, path="/activate/{token}", responses((status=200, body=StdResponse, description="User activated successfully"), (status=409, description="User activation failed")))]
-pub async fn activate_profile(
+pub async fn confirm_profile(
     pool: web::Data<PgPool>,
     req: web::Path<String>,
     secret_key: web::Data<SecretKey>,
@@ -69,12 +83,12 @@ pub async fn activate_profile(
     let (user_email, _) =
         validate_activate_token(&req.into_inner(), &secret_key.into_inner().0).to_internal()?;
 
-    db_activate_user(&pool, &user_email).await.to_internal()?;
+    db_confirm_user(&pool, &user_email).await.to_internal()?;
 
     Ok(HttpResponse::Ok().json(StdResponse::from("Successful activation")))
 }
 
-#[tracing::instrument("Customer login", skip(payload, pool, session))]
+#[tracing::instrument("Customer login", skip(payload, pool, session, default_pass))]
 #[utoipa::path(post, path="/login", responses((status=200, body=StdResponse, description="Customer login successful"), (status=401, description="Customer login unsuccessful")))]
 pub async fn customer_login(
     pool: web::Data<PgPool>,

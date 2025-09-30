@@ -1,8 +1,12 @@
 mod test_user;
+use crate::base::test_user::TestUsers;
+use actix_web::body;
 use error_stack::ResultExt;
 use getset::Getters;
 use once_cell::sync::Lazy;
+use r2d2::Pool;
 use sqlx::{Connection, Executor, PgConnection, PgPool};
+use std::collections::HashMap;
 use thalia::{
     config::{DatabaseConfig, get_config},
     startup::{Application, get_pgconnect_pool},
@@ -10,9 +14,6 @@ use thalia::{
 };
 use uuid::Uuid;
 use wiremock::MockServer;
-
-use crate::base::test_user::TestUsers;
-use r2d2::Pool;
 
 #[derive(Debug, serde::Deserialize)]
 pub struct StdResponse {
@@ -69,6 +70,18 @@ impl TestApp {
             .expect("Failed to execute")
     }
 
+    pub async fn post_customer_signup<Body>(&self, body: &Body) -> reqwest::Response
+    where
+        Body: serde::Serialize,
+    {
+        self.api_client
+            .post(&format!("{}/customer/signup", &self.address))
+            .json(body)
+            .send()
+            .await
+            .expect("Failed to login customer")
+    }
+
     pub async fn post_customer_login<Body>(&self, body: &Body) -> reqwest::Response
     where
         Body: serde::Serialize,
@@ -78,10 +91,8 @@ impl TestApp {
             .json(body)
             .send()
             .await
-            .expect("Failed to login customer")
+            .expect("Failed to login staff")
     }
-
-    // pub async fn get_customer_login(&self) -> reqwest::
 
     pub async fn post_staff_login<Body>(&self, body: &Body) -> reqwest::Response
     where
@@ -95,11 +106,45 @@ impl TestApp {
             .expect("Failed to login staff")
     }
 
+    pub async fn post_staff_signup<Body>(&self, body: &Body) -> reqwest::Response
+    where
+        Body: serde::Serialize,
+    {
+        self.api_client
+            .post(&format!("{}/staff/signup", &self.address))
+            .json(body)
+            .send()
+            .await
+            .expect("Failed to login staff")
+    }
+
     pub async fn clear_test_db(&mut self) {
         sqlx::query(format!(r#"DROP DATABASE "{}" WITH (FORCE);"#, self.db_name).as_str())
             .execute(&mut self.connection)
             .await
             .expect("Failed to drop database");
+    }
+
+    pub fn staff_to_json(&self) -> serde_json::Value {
+        let value = serde_json::json!({"first_name": self.get_test_users().get_staff().get_first_name().as_ref(),
+                                            "last_name": self.get_test_users().get_staff().get_last_name().as_ref(),
+                                            "date_of_birth":self.get_test_users().get_staff().get_date_of_birth(),
+                                            "username":self.get_test_users().get_staff().get_username().as_ref(),
+                                            "password":self.get_test_users().get_staff().get_password().as_ref(),
+                                            "email":self.get_test_users().get_staff().get_email().as_ref(),
+                                            "access_role":"superuser"});
+        value
+    }
+
+    pub fn customer_to_json(&self) -> serde_json::Value {
+        let value = serde_json::json!({"first_name": self.get_test_users().get_customer().get_first_name().as_ref(),
+                                            "last_name": self.get_test_users().get_customer().get_last_name().as_ref(),
+                                            "date_of_birth":self.get_test_users().get_customer().get_date_of_birth(),
+                                            "username":self.get_test_users().get_customer().get_username().as_ref(),
+                                            "password":self.get_test_users().get_customer().get_password().as_ref(),
+                                            "email":self.get_test_users().get_customer().get_email().as_ref(),
+                                            "access_role":"customer"});
+        value
     }
 }
 

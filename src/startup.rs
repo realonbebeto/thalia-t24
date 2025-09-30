@@ -5,7 +5,7 @@ use crate::authentication::schemas::{DefaultPassword, SecretKey};
 use crate::base::schemas::AppBaseUri;
 use crate::config::{Config, DatabaseConfig, Expiration};
 use crate::customer::routes::{
-    activate_profile, customer_login, customer_signup, open_customer_account,
+    confirm_profile, customer_login, customer_signup, open_customer_account,
 };
 use crate::index::{health_check, index_page};
 use crate::ledger::routes::{get_journal_entry, get_journal_entry_by_id};
@@ -69,10 +69,10 @@ async fn run(
                     .route("/health", web::get().to(health_check))
                     .route("/index", web::get().to(index_page)),
             )
+            .route("/staff/signup", web::post().to(staff_signup))
             .route("/staff/login", web::post().to(staff_login))
             .service(
                 web::scope("/admin")
-                    .route("/staff/signup", web::post().to(staff_signup))
                     .route("/user/signup", web::post().to(create_customer_account))
                     .route("/coa", web::post().to(create_chart_account))
                     .route("/type", web::post().to(create_account_type)),
@@ -85,11 +85,11 @@ async fn run(
                         web::get().to(get_journal_entry_by_id),
                     ),
             )
+            .route("/customer/signup", web::post().to(customer_signup))
             .route("/customer/login", web::post().to(customer_login))
             .service(
                 web::scope("/customer")
-                    .route("/signup", web::post().to(customer_signup))
-                    .route("/activate/{token}", web::get().to(activate_profile))
+                    .route("/activate/{token}", web::get().to(confirm_profile))
                     .route("/account", web::post().to(open_customer_account)),
             )
             .service(

@@ -87,6 +87,8 @@ pub struct Expiration {
     pub access_token_expire_secs: u64,
     #[envconfig(from = "REFRESH_TOKEN_EXPIRE_SECS")]
     pub refresh_token_expire_secs: u64,
+    #[envconfig(from = "ACTIVATE_TOKEN_EXPIRE_SECS")]
+    pub activate_token_expire_secs: u64,
 }
 
 #[derive(serde::Deserialize, Envconfig, Debug)]
