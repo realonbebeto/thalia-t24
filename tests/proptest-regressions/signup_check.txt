@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc daae9681138350315d47b34082b5f72f6550d743d9424c49cacbcfe1dfa3785f # shrinks to body = Object {"access_role": String("customer"), "date_of_birth": String("2009-12-03"), "email": String("missing-at-sign.com"), "first_name": String("\t"), "last_name": String("\n"), "password": String(""), "username": String("_$#}[$!.<!|:{><")}
+cc 925ef728114b566dc6a6080b0b278f0ba2c4825bf83ba2049f62e61751fc913d # shrinks to body = Object {"access_role": String("superuser"), "date_of_birth": String("2018-10-29"), "email": String(""), "first_name": String(""), "last_name": String("\t"), "password": String(""), "username": String("$%!2u%r**Td1$Gl^iNB%^%6*E%#lz*^h%!069K!!T9***vvg2&5^^sk^0*oFl2*^^JkFMa96&I!um&ugF1!!*&*t*3Rh8*l^%89!!*^^!$Wm$!#$!6&*6J3^*!DE!ANLn0I^^uLYTE%*#^pj@rP!Sg^B!t*!YK^%h&0*$&82A#&%*k2^*11M!y9SNZ#pL*^d^Nz^Rb^&8G!@K^^*8!l*S*!^^hUHs^^79**^^ac$^oT&!*GjlI5E!0!oxE#pFf*%^e^h%^J*5e4!*%4KZ6^%!T*$%b^")}

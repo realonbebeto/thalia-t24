@@ -1,0 +1,12 @@
+Welcome to {{ company_name }}!
+
+Hi {{ first_name }},
+
+Thank you for signing up! We're excited to have you on board.
+
+To get started, please verify your email address by clicking the link below:
+
+{{ verification_link }}
+
+Best regards,
+The {{ company_name }} Team

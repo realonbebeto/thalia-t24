@@ -1,14 +1,15 @@
+mod invalid_user;
 mod test_user;
+pub use invalid_user::create_invalid_user;
+
 use crate::base::test_user::TestUsers;
-use actix_web::body;
 use error_stack::ResultExt;
 use getset::Getters;
 use once_cell::sync::Lazy;
-use r2d2::Pool;
 use sqlx::{Connection, Executor, PgConnection, PgPool};
-use std::collections::HashMap;
 use thalia::{
     config::{DatabaseConfig, get_config},
+    notification::email_client::EmailClient,
     startup::{Application, get_pgconnect_pool},
     telemetry::{get_tracing_subscriber, init_tracing_subscriber},
 };
@@ -25,7 +26,6 @@ pub struct StdResponse {
 pub struct TestApp {
     address: String,
     pg_pool: PgPool,
-    d7y_pool: Pool<redis::Client>,
     connection: PgConnection,
     db_name: String,
     email_server: MockServer,
@@ -33,13 +33,13 @@ pub struct TestApp {
     test_users: TestUsers,
     api_client: reqwest::Client,
     test_idem_expiration: u64,
+    email_client: EmailClient,
 }
 
 impl TestApp {
     fn new(
         address: String,
         pg_pool: PgPool,
-        d7y_pool: Pool<redis::Client>,
         connection: PgConnection,
         db_name: String,
         email_server: MockServer,
@@ -47,11 +47,11 @@ impl TestApp {
         test_users: TestUsers,
         api_client: reqwest::Client,
         test_idem_expiration: u64,
+        email_client: EmailClient,
     ) -> Self {
         TestApp {
             address,
             pg_pool,
-            d7y_pool,
             connection,
             db_name,
             email_server,
@@ -59,6 +59,7 @@ impl TestApp {
             test_users,
             api_client,
             test_idem_expiration,
+            email_client,
         }
     }
 
@@ -203,6 +204,8 @@ pub async fn spawn_app() -> TestApp {
 
         config.application.port = 0;
 
+        config.email_client.email_base_uri = format!("{}/v3/send", email_server.uri());
+
         config
     };
 
@@ -223,13 +226,9 @@ pub async fn spawn_app() -> TestApp {
         .build()
         .unwrap();
 
-    let redis_client = redis::Client::open(config.redis_uri).unwrap();
-    let d7y_pool = r2d2::Pool::builder().build(redis_client).unwrap();
-
     let test_app = TestApp::new(
         address,
         get_pgconnect_pool(&config.database),
-        d7y_pool,
         connection,
         config.database.db_name,
         email_server,
@@ -237,6 +236,7 @@ pub async fn spawn_app() -> TestApp {
         test_users,
         api_client,
         config.expiration.idempotency_expiration_secs,
+        config.email_client.client(),
     );
 
     test_app

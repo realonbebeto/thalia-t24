@@ -13,13 +13,14 @@ pub enum AccessRole {
     Customer,
 }
 
-impl From<String> for AccessRole {
-    fn from(value: String) -> Self {
+impl TryFrom<String> for AccessRole {
+    type Error = Report<ValidationError>;
+    fn try_from(value: String) -> Result<Self, Self::Error> {
         match value.to_lowercase().trim() {
-            "superuser" => AccessRole::Superuser,
-            "manager" => AccessRole::Manager,
-            "customer" => AccessRole::Customer,
-            _ => AccessRole::Customer,
+            "superuser" => Ok(AccessRole::Superuser),
+            "manager" => Ok(AccessRole::Manager),
+            "customer" => Ok(AccessRole::Customer),
+            _ => Err(Report::new(ValidationError::WrongAccessRole)),
         }
     }
 }
@@ -59,7 +60,7 @@ impl TryFrom<UserCreateRequest> for StaffUser {
         let is_active = false;
         let is_verified = false;
         let date_of_birth = value.date_of_birth;
-        let access_role: AccessRole = value.access_role.into();
+        let access_role: AccessRole = value.access_role.try_into()?;
 
         if access_role == AccessRole::Customer {
             return Err(Report::new(ValidationError::WrongAccessRole));
@@ -95,7 +96,7 @@ impl TryFrom<UserCreateRequest> for CustomerUser {
         let is_verified = false;
         let date_of_birth = value.date_of_birth;
 
-        let access_role: AccessRole = value.access_role.into();
+        let access_role: AccessRole = value.access_role.try_into()?;
 
         if access_role != AccessRole::Customer {
             return Err(Report::new(ValidationError::WrongAccessRole));

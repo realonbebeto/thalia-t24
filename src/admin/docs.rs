@@ -4,6 +4,7 @@ use utoipa::OpenApi;
 #[openapi(paths(
     crate::admin::routes::staff_signup,
     crate::admin::routes::staff_login,
+    crate::admin::routes::confirm_staff,
     crate::admin::routes::create_customer_account,
     crate::admin::routes::update_customer_account,
     crate::admin::routes::create_chart_account,

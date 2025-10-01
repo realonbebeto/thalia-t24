@@ -1,14 +1,25 @@
-use crate::admin::schemas::{AccountTypeRequest, ChartAccountRequest};
-use crate::admin::service::{account_type_creation, chart_account_creation};
-use crate::authentication::schemas::{Credentials, DefaultPassword, LoginRequest, SecretKey};
-use crate::authentication::{SessionState, StaffSession, validate_credentials};
-use crate::authentication::{create_activate_token, create_token, repo::db_store_token};
-use crate::base::StdResponse;
-use crate::base::error::{BaseError, ErrorExt};
+use crate::admin::{
+    schemas::{AccountTypeRequest, ChartAccountRequest},
+    service::{account_type_creation, chart_account_creation},
+};
+use crate::authentication::{
+    SessionState, StaffSession, create_activate_token, create_token,
+    repo::db_store_token,
+    schemas::{Credentials, DefaultPassword, LoginRequest, SecretKey},
+    validate_activate_token, validate_credentials,
+};
+use crate::base::{
+    StdResponse,
+    error::{BaseError, ErrorExt},
+    schemas::AppBaseUri,
+};
 use crate::config::Expiration;
-use crate::user::models::CustomerUser;
-use crate::user::repo::{db_create_user, db_get_user};
-use crate::user::{models::StaffUser, schemas::UserCreateRequest};
+use crate::notification::email_client::EmailClient;
+use crate::user::{
+    models::{CustomerUser, StaffUser},
+    repo::{db_confirm_user, db_create_user, db_get_user},
+    schemas::UserCreateRequest,
+};
 use actix_web::{HttpResponse, cookie::Cookie, http::header, web};
 use actix_web_flash_messages::FlashMessage;
 use sqlx::PgPool;
@@ -18,9 +29,11 @@ use sqlx::PgPool;
 // Signup admin accounts
 pub async fn staff_signup(
     pool: web::Data<PgPool>,
-    request: web::Json<UserCreateRequest>,
     secret_key: web::Data<SecretKey>,
     expiry: web::Data<Expiration>,
+    email_client: web::Data<EmailClient>,
+    app_address: web::Data<AppBaseUri>,
+    request: web::Json<UserCreateRequest>,
 ) -> actix_web::Result<HttpResponse> {
     let user: StaffUser = request.into_inner().try_into().to_badrequest()?;
     let user = user.0;
@@ -56,9 +69,36 @@ pub async fn staff_signup(
 
     tx.commit().await.to_internal()?;
 
-    // TODO Send Activate Email
+    // Send Activate Email
+    email_client
+        .send_welcome_email(
+            &app_address.into_inner().0,
+            user.email,
+            "Welcome to Thalia Corp.",
+            user.first_name.as_ref(),
+            &activate_token,
+            "Thalia Corp.",
+        )
+        .await
+        .to_internal()?;
 
     Ok(HttpResponse::Ok().json(StdResponse::from("User created successfully")))
+}
+
+// activate account
+#[tracing::instrument("Confirm profile")]
+#[utoipa::path(get, path="/confirm/{token}", responses((status=200, body=StdResponse, description="User activated successfully"), (status=409, description="User activation failed")))]
+pub async fn confirm_staff(
+    pool: web::Data<PgPool>,
+    req: web::Path<String>,
+    secret_key: web::Data<SecretKey>,
+) -> actix_web::Result<HttpResponse> {
+    let (user_email, _) =
+        validate_activate_token(&req.into_inner(), &secret_key.into_inner().0).to_internal()?;
+
+    db_confirm_user(&pool, &user_email).await.to_internal()?;
+
+    Ok(HttpResponse::Ok().json(StdResponse::from("Successful activation")))
 }
 
 #[tracing::instrument("Staff login", skip(payload, pool, session, default_pass, secret_key))]
@@ -171,6 +211,7 @@ pub async fn create_customer_account(
     tx.commit().await.to_internal()?;
 
     // TODO Send Email
+
     Ok(HttpResponse::Ok().json(StdResponse::from("User created successfully")))
 }
 

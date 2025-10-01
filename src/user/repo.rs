@@ -3,7 +3,7 @@ use crate::user::models::User;
 use crate::user::schemas::UserResponse;
 use sqlx::{PgPool, Postgres, Transaction};
 
-#[tracing::instrument("Saving user details in the database")]
+#[tracing::instrument("Saving user details in the database", skip(tx, user))]
 pub async fn db_create_user(
     tx: &mut Transaction<'_, Postgres>,
     user: &User,
@@ -30,7 +30,7 @@ pub async fn db_create_user(
     Ok(())
 }
 
-#[tracing::instrument("Pulling user details from the database")]
+#[tracing::instrument("Pulling user details from the database", skip(pool, user_email))]
 pub async fn db_get_user(
     pool: &PgPool,
     user_email: &str,
@@ -44,7 +44,7 @@ pub async fn db_get_user(
     Ok(result)
 }
 
-#[tracing::instrument("Updating confirmation in db")]
+#[tracing::instrument("Updating confirmation in db", skip(pool, user_email))]
 pub async fn db_confirm_user(pool: &PgPool, user_email: &str) -> Result<(), sqlx::Error> {
     sqlx::query("UPDATE tuser SET is_confirmed=true WHERE email=$1")
         .bind(user_email)

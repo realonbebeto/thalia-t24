@@ -2,7 +2,7 @@ use crate::base::error::ValidationError;
 use error_stack::Report;
 use validator::ValidateEmail;
 
-#[derive(serde::Deserialize, serde::Serialize, Debug)]
+#[derive(serde::Deserialize, serde::Serialize, Debug, Clone)]
 pub struct Email(String);
 
 impl Email {

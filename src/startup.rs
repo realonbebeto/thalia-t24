@@ -1,23 +1,21 @@
 use crate::admin::routes::{
-    create_account_type, create_chart_account, create_customer_account, staff_login, staff_signup,
+    confirm_staff, create_account_type, create_chart_account, create_customer_account, staff_login,
+    staff_signup,
 };
 use crate::authentication::schemas::{DefaultPassword, SecretKey};
-use crate::base::schemas::AppBaseUri;
-use crate::config::{Config, DatabaseConfig, Expiration};
+use crate::base::schemas::{AppBaseUri, AppRunParams};
+use crate::config::{Config, DatabaseConfig};
 use crate::customer::routes::{
-    confirm_profile, customer_login, customer_signup, open_customer_account,
+    confirm_customer, customer_login, customer_signup, open_customer_account,
 };
 use crate::index::{health_check, index_page};
 use crate::ledger::routes::{get_journal_entry, get_journal_entry_by_id};
 use crate::openapi_docs::ApiDoc;
 use crate::transaction::routes::{deposit_funds, withdraw_funds};
-use actix_session::SessionMiddleware;
-use actix_session::storage::RedisSessionStore;
+use actix_session::{SessionMiddleware, storage::RedisSessionStore};
 use actix_web::{App, HttpServer, cookie::Key, dev::Server, web};
-use actix_web_flash_messages::FlashMessagesFramework;
-use actix_web_flash_messages::storage::CookieMessageStore;
-use sqlx::PgPool;
-use sqlx::postgres::PgPoolOptions;
+use actix_web_flash_messages::{FlashMessagesFramework, storage::CookieMessageStore};
+use sqlx::{PgPool, postgres::PgPoolOptions};
 use std::net::TcpListener;
 use tracing_actix_web::TracingLogger;
 use utoipa::OpenApi;
@@ -27,25 +25,18 @@ pub fn get_pgconnect_pool(config: &DatabaseConfig) -> PgPool {
     PgPoolOptions::new().connect_lazy_with(config.with_db())
 }
 
-async fn run(
-    listener: TcpListener,
-    pgpool: PgPool,
-    base_uri: &str,
-    secret: &str,
-    redis_uri: &str,
-    expiration: Expiration,
-    default_password: &str,
-) -> Result<Server, anyhow::Error> {
-    let pgpool = web::Data::new(pgpool);
-    let base_uri = web::Data::new(AppBaseUri(base_uri.to_string()));
-    let secret_key = Key::from(secret.as_bytes());
+async fn run(app_params: AppRunParams<'_>) -> Result<Server, anyhow::Error> {
+    let pgpool = web::Data::new(app_params.pgpool);
+    let base_uri = web::Data::new(AppBaseUri(app_params.base_uri.to_string()));
+    let secret_key = Key::from(app_params.secret.as_bytes());
     let cookie_store = CookieMessageStore::builder(secret_key.clone()).build();
     let message_framework = FlashMessagesFramework::builder(cookie_store).build();
-    let redis_store = RedisSessionStore::new(redis_uri).await?;
+    let redis_store = RedisSessionStore::new(app_params.redis_uri).await?;
 
-    let secret = web::Data::new(SecretKey(secret.to_string()));
-    let expiration = web::Data::new(expiration);
-    let default_password = web::Data::new(DefaultPassword(default_password.to_string()));
+    let secret = web::Data::new(SecretKey(app_params.secret.to_string()));
+    let expiration = web::Data::new(app_params.expiration);
+    let default_password = web::Data::new(DefaultPassword(app_params.default_password.to_string()));
+    let email_client = web::Data::new(app_params.email_client);
 
     let server = HttpServer::new(move || {
         let logger = TracingLogger::default();
@@ -63,6 +54,7 @@ async fn run(
             .app_data(secret.clone())
             .app_data(expiration.clone())
             .app_data(default_password.clone())
+            .app_data(email_client.clone())
             .service(SwaggerUi::new("/docs/{_:.*}").url("/api-docs/openapi.json", openapi.clone()))
             .service(
                 web::scope("/home")
@@ -71,8 +63,9 @@ async fn run(
             )
             .route("/staff/signup", web::post().to(staff_signup))
             .route("/staff/login", web::post().to(staff_login))
+            .route("/staff/{token}", web::get().to(confirm_staff))
             .service(
-                web::scope("/admin")
+                web::scope("/staff")
                     .route("/user/signup", web::post().to(create_customer_account))
                     .route("/coa", web::post().to(create_chart_account))
                     .route("/type", web::post().to(create_account_type)),
@@ -87,10 +80,9 @@ async fn run(
             )
             .route("/customer/signup", web::post().to(customer_signup))
             .route("/customer/login", web::post().to(customer_login))
+            .route("/customer/{token}", web::get().to(confirm_customer))
             .service(
-                web::scope("/customer")
-                    .route("/activate/{token}", web::get().to(confirm_profile))
-                    .route("/account", web::post().to(open_customer_account)),
+                web::scope("/customer").route("/account", web::post().to(open_customer_account)),
             )
             .service(
                 web::scope("/transaction")
@@ -98,7 +90,7 @@ async fn run(
                     .route("/withdraw", web::post().to(withdraw_funds)),
             )
     })
-    .listen(listener)?
+    .listen(app_params.listener)?
     .run();
 
     Ok(server)
@@ -113,19 +105,22 @@ impl Application {
     pub async fn build(config: &Config) -> Result<Self, anyhow::Error> {
         let pgpool = get_pgconnect_pool(&config.database);
         let address = format!("{}:{}", config.application.host, config.application.port);
-        let listener = TcpListener::bind(address)?;
+        let listener = TcpListener::bind(&address)?;
         let port = listener.local_addr().unwrap().port();
+        let email_client = config.email_client.client();
 
-        let server = run(
+        let app_params = AppRunParams {
             listener,
             pgpool,
-            &config.application.app_uri,
-            &config.application.secret_key,
-            &config.redis_uri,
-            config.expiration.clone(),
-            &config.application.default_password,
-        )
-        .await?;
+            base_uri: &config.application.app_uri,
+            secret: &config.application.secret_key,
+            redis_uri: &config.redis_uri,
+            expiration: config.expiration.clone(),
+            default_password: &config.application.default_password,
+            email_client,
+        };
+
+        let server = run(app_params).await?;
 
         Ok(Self { port, server })
     }

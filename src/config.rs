@@ -1,3 +1,5 @@
+use crate::base::Email;
+use crate::notification::email_client::EmailClient;
 use envconfig::Envconfig;
 use sqlx::ConnectOptions;
 use sqlx::postgres::PgConnectOptions;
@@ -105,6 +107,8 @@ pub struct Config {
     pub bunyan_formatting_name: String,
     #[envconfig(nested)]
     pub expiration: Expiration,
+    #[envconfig(nested)]
+    pub email_client: EmailClientSettings,
 }
 
 pub fn get_config() -> Result<Config, envconfig::Error> {
@@ -112,4 +116,46 @@ pub fn get_config() -> Result<Config, envconfig::Error> {
     let config = Config::init_from_env().expect("Failed to parse required app env variables");
 
     Ok(config)
+}
+
+#[derive(serde::Deserialize, Envconfig, Debug)]
+pub struct EmailClientSettings {
+    #[envconfig(from = "APP_PORT")]
+    pub port: u16,
+    #[envconfig(from = "APP_HOST")]
+    pub host: String,
+    #[envconfig(from = "EMAIL_BASE_URI")]
+    pub email_base_uri: String,
+    #[envconfig(from = "SENDER_EMAIL")]
+    pub sender_email: String,
+    #[envconfig(from = "PUBLIC_EMAIL_KEY")]
+    pub public_email_key: String,
+    #[envconfig(from = "PRIVATE_EMAIL_KEY")]
+    pub private_email_key: String,
+    #[envconfig(from = "TIMEOUT_MS")]
+    pub timeout_milliseconds: u64,
+}
+
+impl EmailClientSettings {
+    pub fn sender(&self) -> Result<Email, anyhow::Error> {
+        Ok(Email::parse(self.sender_email.clone()).expect("Failed to parse sender email"))
+    }
+
+    pub fn timeout(&self) -> std::time::Duration {
+        std::time::Duration::from_millis(self.timeout_milliseconds)
+    }
+
+    pub fn client(&self) -> EmailClient {
+        let sender_email = self.sender().expect("Invalid sender email address");
+        let timeout = self.timeout();
+
+        EmailClient::new(
+            &self.email_base_uri,
+            sender_email,
+            &self.private_email_key,
+            &self.public_email_key,
+            timeout,
+        )
+        .expect("Failed to setup email client")
+    }
 }

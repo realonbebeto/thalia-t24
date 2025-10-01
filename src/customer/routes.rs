@@ -35,7 +35,6 @@ pub async fn customer_signup(
 ) -> actix_web::Result<HttpResponse> {
     let user: CustomerUser = request.into_inner().try_into().to_badrequest()?;
     let user = user.0;
-    dbg!(1);
 
     // Check if a user is age > 18
     let age_days = (Utc::now().date_naive() - user.date_of_birth).num_days();
@@ -43,12 +42,8 @@ pub async fn customer_signup(
         return Ok(HttpResponse::BadRequest().json(StdResponse::from("You need to be 18 or older to use this service. Please try again when you meet the age requirement.")));
     }
 
-    dbg!(2);
-
     let mut tx = pool.begin().await.to_internal()?;
     db_create_user(&mut tx, &user).await.to_internal()?;
-
-    dbg!(3);
 
     // Create activate token
     let activate_token = create_activate_token(
@@ -73,9 +68,9 @@ pub async fn customer_signup(
 }
 
 // activate account
-#[tracing::instrument("Activate profile")]
-#[utoipa::path(get, path="/activate/{token}", responses((status=200, body=StdResponse, description="User activated successfully"), (status=409, description="User activation failed")))]
-pub async fn confirm_profile(
+#[tracing::instrument("Confirm profile")]
+#[utoipa::path(get, path="/confirm/{token}", responses((status=200, body=StdResponse, description="User activated successfully"), (status=409, description="User activation failed")))]
+pub async fn confirm_customer(
     pool: web::Data<PgPool>,
     req: web::Path<String>,
     secret_key: web::Data<SecretKey>,

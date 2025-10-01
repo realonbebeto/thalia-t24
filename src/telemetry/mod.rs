@@ -51,7 +51,7 @@ where
         self.map_err(|e| {
             let span = tracing::Span::current();
             span.in_scope(|| {
-                tracing::error!(error=%e, error_debug=?e, context=context);
+                tracing::error!(target: "thalia_errors" ,error=%e, error_debug=?e, context=context);
             });
             e
         })
