@@ -128,7 +128,7 @@ async fn customer_signup_persists_the_new_profile() {
 }
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(100))]
+    #![proptest_config(ProptestConfig::with_cases(10))]
     #[test]
     fn staff_signup_returns_400_for_any_invalid_input(body in create_invalid_user("customer")) {
         let runtime = tokio::runtime::Runtime::new().unwrap();

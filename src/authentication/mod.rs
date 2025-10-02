@@ -5,4 +5,5 @@ pub use util::*;
 mod auth;
 pub mod repo;
 pub use auth::*;
+pub mod middleware;
 pub mod schemas;

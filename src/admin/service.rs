@@ -1,16 +1,10 @@
 use crate::admin::models::{ChartAccount, CustomerAccountType};
-use crate::admin::repo::{db_create_account_type, db_create_chart_account};
+use crate::admin::repo::{db_create_account_type, db_create_chart_account, db_get_coa_by_code};
 use crate::admin::schemas::{AccountTypeRequest, ChartAccountRequest};
 use crate::base::error::BaseError;
 use error_stack::{Report, ResultExt};
 use sqlx::PgPool;
 use uuid::Uuid;
-
-pub fn generate_code() -> String {
-    let u = &Uuid::now_v7().as_u128().to_string()[..5];
-
-    u.to_string()
-}
 
 #[tracing::instrument("Create account type", skip(pool))]
 pub async fn account_type_creation(
@@ -34,21 +28,29 @@ pub async fn account_type_creation(
 pub async fn chart_account_creation(
     pool: &PgPool,
     request: ChartAccountRequest,
-) -> Result<(), Report<BaseError>> {
-    let code = generate_code();
-
-    let coa = ChartAccount {
-        id: Uuid::now_v7(),
-        name: request.name,
-        coa_type: request
+) -> Result<(), BaseError> {
+    let coa = ChartAccount::new(
+        Uuid::now_v7(),
+        &request.code,
+        request.name,
+        request
             .coa_type
             .try_into()
             .change_context(BaseError::BadRequest {
                 message: "Wrong chart account type".into(),
             })?,
-        code,
-        currency: request.currency,
-    };
+        request.currency,
+    );
+
+    if db_get_coa_by_code(pool, &request.code)
+        .await
+        .change_context(BaseError::Internal)?
+        .is_some()
+    {
+        Err(BaseError::AlreadyExists {
+            message: "coa already exists".into(),
+        })?
+    }
 
     db_create_chart_account(pool, &coa)
         .await

@@ -1,4 +1,16 @@
-use actix_web::{HttpRequest, dev::ServiceRequest};
+use crate::{
+    authentication::{
+        read_request_access_token,
+        repo::{db_get_password_by_email, db_get_password_by_username},
+        schemas::{
+            AccessLevel, ActivateClaims, Credentials, LoginIdentifier, SessionMetadata, TokenClaims,
+        },
+        util::to_unix_expiry,
+    },
+    base::error::BaseError,
+    telemetry::spawn_blocking_with_tracing,
+};
+use actix_web::dev::ServiceRequest;
 use argon2::{
     Argon2, Params, PasswordHash, PasswordHasher, PasswordVerifier, Version,
     password_hash::{SaltString, rand_core},
@@ -6,18 +18,7 @@ use argon2::{
 use error_stack::{Report, ResultExt};
 use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, Validation, decode, encode};
 use sqlx::PgPool;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
-
-use crate::{
-    authentication::{
-        read_request_access_token,
-        repo::{db_get_password_by_email, db_get_password_by_username},
-        schemas::{ActivateClaims, Credentials, LoginIdentifier, TokenClaims},
-    },
-    base::error::BaseError,
-    telemetry::spawn_blocking_with_tracing,
-};
 
 #[derive(Debug, thiserror::Error)]
 pub enum PasswordError {
@@ -64,36 +65,41 @@ fn verify_password(expected_password: &str, password: &str) -> Result<(), Report
 pub async fn validate_credentials(
     pool: &PgPool,
     credentials: Credentials,
-) -> Result<Uuid, Report<BaseError>> {
+) -> Result<(Uuid, String), BaseError> {
     let mut user_id: Option<Uuid> = None;
+    let mut user_name = String::from("1");
     // Used to limit timing attack
     let mut expected_password = credentials.get_default_password().clone();
 
-    if let Some((retrieved_user_id, retrieved_password)) = match credentials.get_login_identifier()
+    if let Some((retrieved_user_id, username, retrieved_password)) =
+        match credentials.get_login_identifier() {
+            LoginIdentifier::Email(email) => {
+                let (retrieved_user_id, username, retrieved_password) =
+                    db_get_password_by_email(pool, email).await.change_context(
+                        BaseError::InvalidCredentials {
+                            message: "Invalid password or username".into(),
+                        },
+                    )?;
+
+                Some((retrieved_user_id, username, retrieved_password))
+            }
+            LoginIdentifier::Username(username) => {
+                let (retrieved_user_id, username, retrieved_password) =
+                    db_get_password_by_username(pool, username)
+                        .await
+                        .change_context(BaseError::InvalidCredentials {
+                            message: "Invalid password or username".into(),
+                        })?;
+
+                Some((retrieved_user_id, username, retrieved_password))
+            }
+        }
     {
-        LoginIdentifier::Email(email) => {
-            let (retrieved_user_id, retrieved_password) = db_get_password_by_email(pool, email)
-                .await
-                .change_context(BaseError::InvalidCredentials {
-                    message: "Invalid password or username".into(),
-                })?;
-
-            Some((retrieved_user_id, retrieved_password))
-        }
-        LoginIdentifier::Username(username) => {
-            let (retrieved_user_id, retrieved_password) =
-                db_get_password_by_username(pool, username)
-                    .await
-                    .change_context(BaseError::InvalidCredentials {
-                        message: "Invalid password or username".into(),
-                    })?;
-
-            Some((retrieved_user_id, retrieved_password))
-        }
-    } {
         user_id = Some(retrieved_user_id);
         // Replace password with retrieved password
         expected_password = retrieved_password;
+
+        user_name = username;
     }
 
     if let Err(e) = spawn_blocking_with_tracing(move || {
@@ -104,143 +110,114 @@ pub async fn validate_credentials(
     {
         match e.current_context() {
             PasswordError::BadPassword | PasswordError::ParseError => {
-                return Err(Report::new(BaseError::InvalidCredentials {
+                return Err(BaseError::InvalidCredentials {
                     message: "Wrong password or username".into(),
-                }));
+                });
             }
 
             _ => {
-                return Err(Report::new(BaseError::Internal));
+                return Err(BaseError::Internal);
             }
         }
     }
 
-    user_id.ok_or_else(|| {
-        Report::new(BaseError::InvalidCredentials {
-            message: "Wrong password or username".into(),
-        })
+    if let Some(id) = user_id {
+        return Ok((id, user_name));
+    }
+
+    Err(BaseError::InvalidCredentials {
+        message: "Wrong password or username".into(),
     })
 }
 
-#[tracing::instrument("Create activate token")]
+#[tracing::instrument("Create activate token", skip(user_id, email, expiry, secret_key))]
 pub fn create_activate_token(
     user_id: Uuid,
     email: &str,
     expiry: u64,
     secret_key: &str,
-) -> Result<String, Report<TokenError>> {
-    let now = SystemTime::now();
-    let exp = (now + Duration::from_secs(expiry * 60))
-        .duration_since(UNIX_EPOCH)
-        .change_context(TokenError::TimeError)?
-        .as_secs() as usize;
-
-    let iat = now
-        .duration_since(UNIX_EPOCH)
-        .change_context(TokenError::TimeError)?
-        .as_secs() as usize;
-
-    let claims = ActivateClaims::new(email.into(), iat, user_id, exp);
+    role: AccessLevel,
+) -> Result<String, BaseError> {
+    let expiry = to_unix_expiry(expiry)?;
+    let claims = ActivateClaims::new(email.into(), user_id, expiry, role);
 
     let token = encode(
         &Header::new(Algorithm::HS256),
         &claims,
         &EncodingKey::from_secret(secret_key.as_ref()),
     )
-    .change_context(TokenError::EncodeError)?;
+    .map_err(|e| e.into_kind())?;
     Ok(token)
 }
 
-#[tracing::instrument("Validate activate token")]
+#[tracing::instrument("Validate activate token", skip(token, secret_key))]
 pub fn validate_activate_token(
     token: &str,
     secret_key: &str,
-) -> Result<(String, Uuid), Report<TokenError>> {
+) -> Result<(String, Uuid, AccessLevel), BaseError> {
     let token_data = decode::<ActivateClaims>(
         token,
         &DecodingKey::from_secret(secret_key.as_ref()),
         &Validation::new(Algorithm::HS256),
     )
-    .change_context(TokenError::DecodeError)?;
+    // Converting wrapper error to kind
+    .map_err(|e| e.into_kind())?;
 
-    Ok((token_data.claims.get_sub(), token_data.claims.get_aud()))
+    Ok((
+        token_data.claims.get_sub(),
+        token_data.claims.get_aud(),
+        token_data.claims.get_role(),
+    ))
 }
 
-#[derive(Debug, thiserror::Error)]
-pub enum TokenError {
-    #[error("Failed to create time from epoch")]
-    Empty,
-    #[error("Failed to create time from epoch")]
-    TimeError,
-    #[error("Failed to encode")]
-    EncodeError,
-    #[error("Failed to decode")]
-    DecodeError,
-}
-
-#[tracing::instrument("Create token")]
+#[tracing::instrument("Create token", skip(user_id, role, expiry, secret_key))]
 pub fn create_token(
     user_id: Uuid,
+    username: &str,
+    role: AccessLevel,
     expiry: u64,
     secret_key: &str,
-) -> Result<String, Report<TokenError>> {
-    let exp = (SystemTime::now() + Duration::from_secs(expiry))
-        .duration_since(UNIX_EPOCH)
-        .change_context(TokenError::TimeError)?
-        .as_secs() as usize;
-
-    let claims = TokenClaims::new(user_id, exp);
+) -> Result<String, BaseError> {
+    let claims = TokenClaims::new(user_id, expiry, username, role);
 
     let jwt = encode(
         &Header::new(Algorithm::HS256),
         &claims,
         &EncodingKey::from_secret(secret_key.as_ref()),
     )
-    .change_context(TokenError::EncodeError)?;
+    .map_err(|e| e.into_kind())?;
 
     Ok(jwt)
 }
 
-#[tracing::instrument("Validate access token")]
+#[tracing::instrument("Validate access token", skip(req, secret_key))]
 pub fn validate_access_token(
     req: &ServiceRequest,
     secret_key: &str,
-) -> Result<Uuid, Report<TokenError>> {
-    let access_token =
-        read_request_access_token(req.headers()).change_context(TokenError::DecodeError)?;
+) -> Result<SessionMetadata, BaseError> {
+    let access_token = read_request_access_token(req.headers())?;
 
     let access_token_data = decode::<TokenClaims>(
         &access_token,
         &DecodingKey::from_secret(secret_key.as_ref()),
         &Validation::new(Algorithm::HS256),
     )
-    .change_context(TokenError::DecodeError)?;
+    .map_err(|e| e.into_kind())?;
 
-    Ok(access_token_data.claims.get_sub())
+    Ok(access_token_data.claims.into())
 }
 
-#[tracing::instrument("Validate refresh token")]
+#[tracing::instrument("Validate refresh token", skip(refresh_token, secret_key))]
 pub fn validate_refresh_token(
-    req: &HttpRequest,
+    refresh_token: &str,
     secret_key: &str,
-) -> Result<Uuid, Report<TokenError>> {
-    let refresh_token = req
-        .cookie("refresh_token")
-        .ok_or(TokenError::Empty)
-        .change_context(TokenError::Empty)?
-        .to_string();
-
-    let refresh_token = refresh_token
-        .strip_prefix("refresh_token")
-        .ok_or(TokenError::Empty)
-        .change_context(TokenError::Empty)?;
-
+) -> Result<SessionMetadata, BaseError> {
     let refresh_token_data = decode::<TokenClaims>(
         refresh_token,
         &DecodingKey::from_secret(secret_key.as_ref()),
         &Validation::new(Algorithm::HS256),
     )
-    .change_context(TokenError::DecodeError)?;
+    .map_err(|e| e.into_kind())?;
 
-    Ok(refresh_token_data.claims.get_sub())
+    Ok(refresh_token_data.claims.into())
 }

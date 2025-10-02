@@ -4,11 +4,12 @@ use crate::account::{
     models::AccountType,
     schemas::{UserAccountBalance, UserAccountCreateRequest},
 };
+use crate::authentication::schemas::SessionMetadata;
 use crate::authentication::{
     create_activate_token, create_token,
     repo::db_store_token,
-    schemas::{Credentials, DefaultPassword, LoginRequest, SecretKey},
-    session_state::{CustomerSession, SessionState},
+    schemas::{AccessLevel, Credentials, DefaultPassword, LoginRequest, SecretKey},
+    session_state::{CustomerSession, SessionType},
     validate_activate_token, validate_credentials,
 };
 use crate::base::StdResponse;
@@ -51,6 +52,7 @@ pub async fn customer_signup(
         user.email.as_ref(),
         expiry.into_inner().access_token_expire_secs,
         &secret_key.into_inner().0,
+        AccessLevel::Customer,
     )
     .to_internal()?;
 
@@ -69,13 +71,13 @@ pub async fn customer_signup(
 
 // activate account
 #[tracing::instrument("Confirm profile")]
-#[utoipa::path(get, path="/confirm/{token}", responses((status=200, body=StdResponse, description="User activated successfully"), (status=409, description="User activation failed")))]
+#[utoipa::path(get, path="/customer/confirm/{token}", responses((status=200, body=StdResponse, description="User activated successfully"), (status=409, description="User activation failed")))]
 pub async fn confirm_customer(
     pool: web::Data<PgPool>,
     req: web::Path<String>,
     secret_key: web::Data<SecretKey>,
 ) -> actix_web::Result<HttpResponse> {
-    let (user_email, _) =
+    let (user_email, _, _) =
         validate_activate_token(&req.into_inner(), &secret_key.into_inner().0).to_internal()?;
 
     db_confirm_user(&pool, &user_email).await.to_internal()?;
@@ -103,23 +105,37 @@ pub async fn customer_login(
         Credentials::from(payload.into_inner(), &default_pass.into_inner().0).to_badrequest()?;
 
     match validate_credentials(&pool, credentials).await {
-        Ok(customer_id) => {
+        Ok((customer_id, username)) => {
             tracing::Span::current().record("customer_id", tracing::field::display(customer_id));
+
+            let user_session = SessionMetadata::new(
+                customer_id,
+                expiration.session_expiration,
+                &username,
+                AccessLevel::Customer,
+            )?;
 
             session.renew();
 
             session
-                .insert_sesh_id(customer_id)
+                .insert_sesh_user(user_session)
                 .map_err(|_| BaseError::internal())?;
 
             FlashMessage::success("Customer Authorized").send();
 
-            let access_token =
-                create_token(customer_id, expiration.access_token_expire_secs, secret_key)
-                    .to_internal()?;
+            let access_token = create_token(
+                customer_id,
+                &username,
+                AccessLevel::Customer,
+                expiration.access_token_expire_secs,
+                secret_key,
+            )
+            .to_internal()?;
 
             let refresh_token = create_token(
                 customer_id,
+                &username,
+                AccessLevel::Customer,
                 expiration.refresh_token_expire_secs,
                 secret_key,
             )
@@ -135,10 +151,10 @@ pub async fn customer_login(
                 .json(StdResponse::from("Customer Login Successful")))
         }
 
-        Err(e) => match e.current_context() {
+        Err(e) => match e {
             BaseError::InvalidCredentials { message } => {
                 FlashMessage::info(format!("Customer login unsuccessful: {}", message)).send();
-                Ok(HttpResponse::Unauthorized().json(StdResponse::from(message)))
+                Ok(HttpResponse::Unauthorized().json(StdResponse::from(&message)))
             }
             _ => {
                 FlashMessage::error("Internal Server Error").send();

@@ -119,6 +119,18 @@ impl TestApp {
             .expect("Failed to login staff")
     }
 
+    pub async fn post_coa_creation<Body>(&self, body: &Body) -> reqwest::Response
+    where
+        Body: serde::Serialize,
+    {
+        self.api_client
+            .post(&format!("{}/staff/coa", &self.address))
+            .json(body)
+            .send()
+            .await
+            .expect("Failed to create coa")
+    }
+
     pub async fn clear_test_db(&mut self) {
         sqlx::query(format!(r#"DROP DATABASE "{}" WITH (FORCE);"#, self.db_name).as_str())
             .execute(&mut self.connection)

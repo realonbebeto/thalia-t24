@@ -1,14 +1,17 @@
+use crate::authentication::schemas::SessionMetadata;
 use actix_session::{Session, SessionExt, SessionGetError, SessionInsertError};
 use actix_web::FromRequest;
-use sqlx::types::Uuid;
 use std::future::{Ready, ready};
 
 pub struct StaffSession(Session);
 
 pub struct CustomerSession(Session);
 
-pub trait SessionState {
-    const ID_KEY: &'static str = "id";
+pub trait SessionType: FromRequest
+where
+    Self::Error: Into<actix_web::Error>,
+{
+    const ID_KEY: &'static str = "user";
 
     fn value(&self) -> Session;
     fn from_session(session: Session) -> Self;
@@ -17,11 +20,17 @@ pub trait SessionState {
         self.value().renew();
     }
 
-    fn insert_sesh_id(&self, id: Uuid) -> Result<(), SessionInsertError> {
-        self.value().insert(Self::ID_KEY, id)
+    fn update_session(&self, metadata: SessionMetadata) -> Result<(), SessionInsertError> {
+        // Very simple replacement
+        self.value().purge();
+        self.value().insert(Self::ID_KEY, metadata)
     }
 
-    fn get_sesh_id(&self) -> Result<Option<Uuid>, SessionGetError> {
+    fn insert_sesh_user(&self, metadata: SessionMetadata) -> Result<(), SessionInsertError> {
+        self.value().insert(Self::ID_KEY, metadata)
+    }
+
+    fn get_sesh_user(&self) -> Result<Option<SessionMetadata>, SessionGetError> {
         self.value().get(Self::ID_KEY)
     }
 
@@ -30,7 +39,7 @@ pub trait SessionState {
     }
 }
 
-impl SessionState for StaffSession {
+impl SessionType for StaffSession {
     fn value(&self) -> Session {
         self.0.clone()
     }
@@ -40,7 +49,7 @@ impl SessionState for StaffSession {
     }
 }
 
-impl SessionState for CustomerSession {
+impl SessionType for CustomerSession {
     fn value(&self) -> Session {
         self.0.clone()
     }

@@ -3,9 +3,11 @@ use crate::admin::{
     service::{account_type_creation, chart_account_creation},
 };
 use crate::authentication::{
-    SessionState, StaffSession, create_activate_token, create_token,
+    SessionType, StaffSession, create_activate_token, create_token,
     repo::db_store_token,
-    schemas::{Credentials, DefaultPassword, LoginRequest, SecretKey},
+    schemas::{
+        AccessLevel, Credentials, DefaultPassword, LoginRequest, SecretKey, SessionMetadata,
+    },
     validate_activate_token, validate_credentials,
 };
 use crate::base::{
@@ -58,6 +60,7 @@ pub async fn staff_signup(
         user.email.as_ref(),
         expiry.into_inner().activate_token_expire_secs,
         &secret_key.into_inner().0,
+        AccessLevel::Superuser,
     )
     .to_internal()?;
 
@@ -86,14 +89,14 @@ pub async fn staff_signup(
 }
 
 // activate account
-#[tracing::instrument("Confirm profile")]
-#[utoipa::path(get, path="/confirm/{token}", responses((status=200, body=StdResponse, description="User activated successfully"), (status=409, description="User activation failed")))]
+#[tracing::instrument("Confirm profile", skip(pool, req, secret_key))]
+#[utoipa::path(get, path="/staff/confirm/{token}", responses((status=200, body=StdResponse, description="User activated successfully"), (status=409, description="User activation failed")))]
 pub async fn confirm_staff(
     pool: web::Data<PgPool>,
     req: web::Path<String>,
     secret_key: web::Data<SecretKey>,
 ) -> actix_web::Result<HttpResponse> {
-    let (user_email, _) =
+    let (user_email, _, _) =
         validate_activate_token(&req.into_inner(), &secret_key.into_inner().0).to_internal()?;
 
     db_confirm_user(&pool, &user_email).await.to_internal()?;
@@ -122,24 +125,40 @@ pub async fn staff_login(
         Credentials::from(payload.into_inner(), &default_pass.into_inner().0).to_badrequest()?;
 
     match validate_credentials(&pool, credentials).await {
-        Ok(staff_id) => {
+        Ok((staff_id, username)) => {
             tracing::Span::current().record("staff_id", tracing::field::display(staff_id));
+            let user_session = SessionMetadata::new(
+                staff_id,
+                expiration.session_expiration,
+                &username,
+                AccessLevel::Superuser,
+            )?;
 
             session.renew();
 
             session
-                .insert_sesh_id(staff_id)
+                .insert_sesh_user(user_session)
                 .map_err(|_| BaseError::internal())?;
 
             FlashMessage::info("Staff Authorized").send();
 
-            let access_token =
-                create_token(staff_id, expiration.access_token_expire_secs, secret_key)
-                    .to_internal()?;
+            let access_token = create_token(
+                staff_id,
+                &username,
+                AccessLevel::Superuser,
+                expiration.access_token_expire_secs,
+                secret_key,
+            )
+            .to_internal()?;
 
-            let refresh_token =
-                create_token(staff_id, expiration.refresh_token_expire_secs, secret_key)
-                    .to_internal()?;
+            let refresh_token = create_token(
+                staff_id,
+                &username,
+                AccessLevel::Superuser,
+                expiration.refresh_token_expire_secs,
+                secret_key,
+            )
+            .to_internal()?;
 
             Ok(HttpResponse::Ok()
                 .insert_header((header::AUTHORIZATION, format!("Bearer {}", access_token)))
@@ -151,10 +170,10 @@ pub async fn staff_login(
                 .json(StdResponse::from("Staff Login Successful")))
         }
 
-        Err(e) => match e.current_context() {
+        Err(e) => match e {
             BaseError::InvalidCredentials { message } => {
                 FlashMessage::info(format!("Staff login unsuccessful: {}", message)).send();
-                Ok(HttpResponse::Unauthorized().json(StdResponse::from(message)))
+                Ok(HttpResponse::Unauthorized().json(StdResponse::from(&message)))
             }
             _ => {
                 FlashMessage::error("Internal Server Error").send();
@@ -193,12 +212,13 @@ pub async fn create_customer_account(
     db_create_user(&mut tx, &user).await.to_internal()?;
     tracing::info!("User created");
 
-    // Generate activate token
+    // Generate activate token for customer
     let activate_token = create_activate_token(
         user.id,
         user.email.as_ref(),
         expiry.into_inner().activate_token_expire_secs,
         &secret_key.into_inner().0,
+        AccessLevel::Customer,
     )
     .to_internal()?;
 
@@ -225,9 +245,7 @@ pub async fn create_chart_account(
     pool: web::Data<PgPool>,
     request: web::Json<ChartAccountRequest>,
 ) -> actix_web::Result<HttpResponse> {
-    chart_account_creation(&pool, request.into_inner())
-        .await
-        .to_badrequest()?;
+    chart_account_creation(&pool, request.into_inner()).await?;
     Ok(HttpResponse::Ok().json(StdResponse::from("Chart account created successfully")))
 }
 

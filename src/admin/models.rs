@@ -33,13 +33,26 @@ impl TryFrom<String> for CoaType {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, sqlx::FromRow, getset::Getters)]
+#[get = "pub with_prefix"]
 pub struct ChartAccount {
-    pub id: Uuid,
-    pub code: String,
-    pub name: String,
-    pub coa_type: CoaType,
-    pub currency: String,
+    id: Uuid,
+    code: String,
+    name: String,
+    coa_type: CoaType,
+    currency: String,
+}
+
+impl ChartAccount {
+    pub fn new(id: Uuid, code: &str, name: String, coa_type: CoaType, currency: String) -> Self {
+        Self {
+            id,
+            code: code.into(),
+            name,
+            coa_type,
+            currency,
+        }
+    }
 }
 
 pub struct CustomerAccountType {

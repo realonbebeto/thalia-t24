@@ -1,6 +1,7 @@
 use crate::base::StdResponse;
 use actix_web::HttpResponse;
 use error_stack::Report;
+use jsonwebtoken::errors::ErrorKind;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ValidationError {
@@ -18,7 +19,7 @@ pub enum ValidationError {
     WrongAccessRole,
 }
 
-#[derive(Debug, thiserror::Error, Clone)]
+#[derive(Debug, thiserror::Error, Clone, serde::Serialize)]
 pub enum BaseError {
     #[error("Bad request: {message}")]
     BadRequest { message: String },
@@ -32,6 +33,8 @@ pub enum BaseError {
     AlreadyExists { message: String },
     #[error("Invalid Credentials: {message}")]
     InvalidCredentials { message: String },
+    #[error("Access denied to resource")]
+    Forbidden,
 }
 
 impl BaseError {
@@ -53,6 +56,10 @@ impl BaseError {
 
     pub fn service_unavailable() -> Self {
         Self::ServiceUnavailable
+    }
+
+    pub fn forbidden() -> Self {
+        Self::Forbidden
     }
 
     pub fn already_exists(message: impl Into<String>) -> Self {
@@ -89,31 +96,15 @@ impl actix_web::ResponseError for BaseError {
             BaseError::InvalidCredentials { message } => {
                 (actix_web::http::StatusCode::UNAUTHORIZED, message)
             }
+            BaseError::Forbidden => (
+                actix_web::http::StatusCode::FORBIDDEN,
+                &String::from("Forbidden"),
+            ),
         };
 
         HttpResponse::build(status).json(StdResponse::from(message))
     }
 }
-
-// pub fn internal<E: std::fmt::Display>(err: E) -> AdminError {
-//     AdminError::internal()
-//     // ).attach(format!("Internal error: {}", err))
-// }
-
-// pub fn bad_request<E: std::fmt::Display>(err: E, context: &str) -> AdminError {
-//     AdminError::bad_request(context)
-//     // ).attach(format!("Bad request - {}: {}", context, err))
-// }
-
-// pub fn not_found<E: std::fmt::Display>(err: E, context: &str) -> AdminError {
-//     AdminError::not_found(context)
-//     // ).attach(format!("Not found - {}: {}", context, err))
-// }
-
-// pub fn service_unavailable<E: std::fmt::Display>(err: E) -> AdminError {
-//     AdminError::service_unavailable()
-//     // ).attach(format!("Service unavailable: {}", err))
-// }
 
 type Result<T> = std::result::Result<T, BaseError>;
 
@@ -131,6 +122,7 @@ pub trait ErrorExt<T> {
     fn to_serviceunavailable(self) -> Result<T>;
     fn to_alreadyexists(self) -> Result<T>;
     fn to_invalidcredentials(self) -> Result<T>;
+    fn to_forbidden(self) -> Result<T>;
 }
 
 impl<T, E: std::fmt::Display> ErrorExt<T> for std::result::Result<T, E> {
@@ -156,12 +148,25 @@ impl<T, E: std::fmt::Display> ErrorExt<T> for std::result::Result<T, E> {
     fn to_invalidcredentials(self) -> Result<T> {
         self.map_err(|e| BaseError::invalid_credentials(e.to_string()))
     }
+
+    fn to_forbidden(self) -> Result<T> {
+        self.map_err(|_| BaseError::forbidden())
+    }
 }
 
-// #[derive(Debug, thiserror::Error)]
-// pub enum DBError {
-//     #[error("Database Fault: {message}")]
-//     DBFault { message: String },
-//     #[error("Record(s) not found")]
-//     NotFound,
-// }
+impl From<ErrorKind> for BaseError {
+    fn from(value: ErrorKind) -> Self {
+        match value {
+            ErrorKind::InvalidToken => Self::InvalidCredentials {
+                message: "Authenticate before accessing this resource.".into(),
+            },
+            ErrorKind::MissingRequiredClaim(_) => Self::BadRequest {
+                message: "Your token format is invalid.".into(),
+            },
+            ErrorKind::ExpiredSignature | ErrorKind::InvalidSignature => Self::InvalidCredentials {
+                message: "You're not authorized".into(),
+            },
+            _ => Self::Internal,
+        }
+    }
+}

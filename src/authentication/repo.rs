@@ -24,15 +24,19 @@ pub async fn db_store_token(
 pub async fn db_get_password_by_username(
     pool: &PgPool,
     username: &str,
-) -> Result<(Uuid, String), sqlx::Error> {
-    let result = sqlx::query("SELECT id, password FROM tuser WHERE username=$1")
+) -> Result<(Uuid, String, String), sqlx::Error> {
+    let result = sqlx::query("SELECT id, username, password FROM tuser WHERE username=$1")
         .bind(username)
         .fetch_optional(pool)
         .await
         .trace_with("Error while fetching password string")?;
 
     match result {
-        Some(r) => Ok((r.get::<Uuid, _>("id"), r.get::<String, _>("password"))),
+        Some(r) => Ok((
+            r.get::<Uuid, _>("id"),
+            r.get::<String, _>("username"),
+            r.get::<String, _>("password"),
+        )),
         None => Err(sqlx::Error::RowNotFound)
             .trace_with(&format!("Password for username: {} not found", username)),
     }
@@ -42,15 +46,19 @@ pub async fn db_get_password_by_username(
 pub async fn db_get_password_by_email(
     pool: &PgPool,
     email: &str,
-) -> Result<(Uuid, String), sqlx::Error> {
-    let result = sqlx::query("SELECT id, password FROM tuser WHERE email=$1")
+) -> Result<(Uuid, String, String), sqlx::Error> {
+    let result = sqlx::query("SELECT id, username, password FROM tuser WHERE email=$1")
         .bind(email)
         .fetch_optional(pool)
         .await
         .trace_with("Error while fetching password string")?;
 
     match result {
-        Some(r) => Ok((r.get::<Uuid, _>("id"), r.get::<String, _>("password"))),
+        Some(r) => Ok((
+            r.get::<Uuid, _>("id"),
+            r.get::<String, _>("username"),
+            r.get::<String, _>("password"),
+        )),
         None => Err(sqlx::Error::RowNotFound)
             .trace_with(&format!("Password for email: {} not found", email)),
     }

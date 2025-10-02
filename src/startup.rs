@@ -2,7 +2,10 @@ use crate::admin::routes::{
     confirm_staff, create_account_type, create_chart_account, create_customer_account, staff_login,
     staff_signup,
 };
-use crate::authentication::schemas::{DefaultPassword, SecretKey};
+use crate::authentication::{
+    middleware::{reject_unauthorized_customer, reject_unauthorized_staff},
+    schemas::{DefaultPassword, SecretKey},
+};
 use crate::base::schemas::{AppBaseUri, AppRunParams};
 use crate::config::{Config, DatabaseConfig};
 use crate::customer::routes::{
@@ -13,7 +16,7 @@ use crate::ledger::routes::{get_journal_entry, get_journal_entry_by_id};
 use crate::openapi_docs::ApiDoc;
 use crate::transaction::routes::{deposit_funds, withdraw_funds};
 use actix_session::{SessionMiddleware, storage::RedisSessionStore};
-use actix_web::{App, HttpServer, cookie::Key, dev::Server, web};
+use actix_web::{App, HttpServer, cookie::Key, dev::Server, middleware::from_fn, web};
 use actix_web_flash_messages::{FlashMessagesFramework, storage::CookieMessageStore};
 use sqlx::{PgPool, postgres::PgPoolOptions};
 use std::net::TcpListener;
@@ -63,15 +66,17 @@ async fn run(app_params: AppRunParams<'_>) -> Result<Server, anyhow::Error> {
             )
             .route("/staff/signup", web::post().to(staff_signup))
             .route("/staff/login", web::post().to(staff_login))
-            .route("/staff/{token}", web::get().to(confirm_staff))
+            .route("/staff/confirm/{token}", web::get().to(confirm_staff))
             .service(
                 web::scope("/staff")
+                    .wrap(from_fn(reject_unauthorized_staff))
                     .route("/user/signup", web::post().to(create_customer_account))
                     .route("/coa", web::post().to(create_chart_account))
                     .route("/type", web::post().to(create_account_type)),
             )
             .service(
                 web::scope("/ledger")
+                    .wrap(from_fn(reject_unauthorized_staff))
                     .route("/journal", web::get().to(get_journal_entry))
                     .route(
                         "/journal/{journal_id}",
@@ -80,12 +85,15 @@ async fn run(app_params: AppRunParams<'_>) -> Result<Server, anyhow::Error> {
             )
             .route("/customer/signup", web::post().to(customer_signup))
             .route("/customer/login", web::post().to(customer_login))
-            .route("/customer/{token}", web::get().to(confirm_customer))
+            .route("/customer/confirm/{token}", web::get().to(confirm_customer))
             .service(
-                web::scope("/customer").route("/account", web::post().to(open_customer_account)),
+                web::scope("/customer")
+                    .wrap(from_fn(reject_unauthorized_customer))
+                    .route("/account", web::post().to(open_customer_account)),
             )
             .service(
                 web::scope("/transaction")
+                    .wrap(from_fn(reject_unauthorized_customer))
                     .route("/deposit", web::post().to(deposit_funds))
                     .route("/withdraw", web::post().to(withdraw_funds)),
             )
