@@ -1,6 +1,6 @@
 use crate::account::repo::{db_calculate_account_balance, db_update_account_balance};
-use crate::admin::{models::CoaType, repo::db_get_coa_id_by_coa_type};
 use crate::base::error::{BaseError, ErrorExt};
+use crate::staff::{models::CoaType, repo::db_get_coa_id_by_coa_type};
 use crate::telemetry::TraceError;
 use crate::transaction::repo::db_save_tx_response;
 use crate::transaction::repo::{db_get_saved_tx_response, db_start_tx_idempotent_record};

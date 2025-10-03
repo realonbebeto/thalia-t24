@@ -11,8 +11,6 @@ impl Email {
             Ok(Self(s))
         } else {
             Err(Report::new(ValidationError::InvalidEmail).attach(format!("Failed to parse {}", s)))
-
-            //anyhow::anyhow!(format!("{} is not a valid email.", s))
         }
         // TODO: add validation
     }

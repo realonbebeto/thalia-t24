@@ -1,6 +1,6 @@
 use crate::base::error::BaseError;
 use actix_web::{HttpRequest, http::header::HeaderMap};
-use error_stack::ResultExt;
+use error_stack::{Report, ResultExt};
 use jsonwebtoken::errors::ErrorKind;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -33,7 +33,7 @@ pub fn read_request_refresh_token(req: &HttpRequest) -> Result<String, ErrorKind
     Ok(refresh_token.to_string())
 }
 
-pub fn to_unix_expiry(expiry: u64) -> Result<usize, BaseError> {
+pub fn to_unix_expiry(expiry: u64) -> Result<usize, Report<BaseError>> {
     let exp = (SystemTime::now() + Duration::from_secs(expiry))
         .duration_since(UNIX_EPOCH)
         .change_context(BaseError::Internal)?

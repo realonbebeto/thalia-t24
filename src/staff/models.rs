@@ -10,6 +10,7 @@ pub enum CoaType {
     Equity,
     Income,
     Expense,
+    Memoranda,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -28,7 +29,25 @@ impl TryFrom<String> for CoaType {
             "expense" => Ok(CoaType::Expense),
             "income" => Ok(CoaType::Income),
             "liability" => Ok(CoaType::Liability),
+            "memoranda" => Ok(CoaType::Memoranda),
             _ => Err(Report::new(CoaTypeError::Invalid { message: value })),
+        }
+    }
+}
+
+impl TryFrom<&str> for CoaType {
+    type Error = Report<CoaTypeError>;
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        match value.to_lowercase().trim() {
+            "asset" => Ok(CoaType::Asset),
+            "equity" => Ok(CoaType::Equity),
+            "expense" => Ok(CoaType::Expense),
+            "income" => Ok(CoaType::Income),
+            "liability" => Ok(CoaType::Liability),
+            "memoranda" => Ok(CoaType::Memoranda),
+            _ => Err(Report::new(CoaTypeError::Invalid {
+                message: value.into(),
+            })),
         }
     }
 }
@@ -44,13 +63,13 @@ pub struct ChartAccount {
 }
 
 impl ChartAccount {
-    pub fn new(id: Uuid, code: &str, name: String, coa_type: CoaType, currency: String) -> Self {
+    pub fn new(id: Uuid, code: &str, name: &str, coa_type: CoaType, currency: &str) -> Self {
         Self {
             id,
             code: code.into(),
-            name,
+            name: name.into(),
             coa_type,
-            currency,
+            currency: currency.into(),
         }
     }
 }

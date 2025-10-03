@@ -1,5 +1,4 @@
 pub mod account;
-pub mod admin;
 pub mod analytics;
 pub mod authentication;
 pub mod base;
@@ -14,6 +13,7 @@ pub mod loan;
 pub mod notification;
 pub mod openapi_docs;
 pub mod reporting;
+pub mod staff;
 pub mod startup;
 pub mod telemetry;
 pub mod transaction;

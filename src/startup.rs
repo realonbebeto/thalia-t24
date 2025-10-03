@@ -1,23 +1,26 @@
-use crate::admin::routes::{
-    confirm_staff, create_account_type, create_chart_account, create_customer_account, staff_login,
-    staff_signup,
-};
+use crate::account::routes::open_customer_account;
 use crate::authentication::{
     middleware::{reject_unauthorized_customer, reject_unauthorized_staff},
     schemas::{DefaultPassword, SecretKey},
 };
-use crate::base::schemas::{AppBaseUri, AppRunParams};
-use crate::config::{Config, DatabaseConfig};
-use crate::customer::routes::{
-    confirm_customer, customer_login, customer_signup, open_customer_account,
+use crate::base::{
+    error::MainError,
+    schemas::{AppBaseUri, AppRunParams},
 };
+use crate::config::{Config, DatabaseConfig};
+use crate::customer::routes::{confirm_customer, customer_login, customer_signup};
 use crate::index::{health_check, index_page};
 use crate::ledger::routes::{get_journal_entry, get_journal_entry_by_id};
 use crate::openapi_docs::ApiDoc;
+use crate::staff::routes::{
+    confirm_staff, create_account_type, create_chart_account, create_customer_account, staff_login,
+    staff_signup,
+};
 use crate::transaction::routes::{deposit_funds, withdraw_funds};
 use actix_session::{SessionMiddleware, storage::RedisSessionStore};
 use actix_web::{App, HttpServer, cookie::Key, dev::Server, middleware::from_fn, web};
 use actix_web_flash_messages::{FlashMessagesFramework, storage::CookieMessageStore};
+use error_stack::Report;
 use sqlx::{PgPool, postgres::PgPoolOptions};
 use std::net::TcpListener;
 use tracing_actix_web::TracingLogger;
@@ -28,13 +31,19 @@ pub fn get_pgconnect_pool(config: &DatabaseConfig) -> PgPool {
     PgPoolOptions::new().connect_lazy_with(config.with_db())
 }
 
-async fn run(app_params: AppRunParams<'_>) -> Result<Server, anyhow::Error> {
+async fn run(app_params: AppRunParams<'_>) -> Result<Server, Report<MainError>> {
     let pgpool = web::Data::new(app_params.pgpool);
     let base_uri = web::Data::new(AppBaseUri(app_params.base_uri.to_string()));
     let secret_key = Key::from(app_params.secret.as_bytes());
     let cookie_store = CookieMessageStore::builder(secret_key.clone()).build();
     let message_framework = FlashMessagesFramework::builder(cookie_store).build();
-    let redis_store = RedisSessionStore::new(app_params.redis_uri).await?;
+    let redis_store = RedisSessionStore::new(app_params.redis_uri)
+        .await
+        .map_err(|e| {
+            Report::new(MainError::Runtime {
+                value: format!(" {}", e),
+            })
+        })?;
 
     let secret = web::Data::new(SecretKey(app_params.secret.to_string()));
     let expiration = web::Data::new(app_params.expiration);
@@ -72,7 +81,8 @@ async fn run(app_params: AppRunParams<'_>) -> Result<Server, anyhow::Error> {
                     .wrap(from_fn(reject_unauthorized_staff))
                     .route("/user/signup", web::post().to(create_customer_account))
                     .route("/coa", web::post().to(create_chart_account))
-                    .route("/type", web::post().to(create_account_type)),
+                    .route("/type", web::post().to(create_account_type))
+                    .route("/account", web::post().to(open_customer_account)),
             )
             .service(
                 web::scope("/ledger")
@@ -98,7 +108,12 @@ async fn run(app_params: AppRunParams<'_>) -> Result<Server, anyhow::Error> {
                     .route("/withdraw", web::post().to(withdraw_funds)),
             )
     })
-    .listen(app_params.listener)?
+    .listen(app_params.listener)
+    .map_err(|e| {
+        Report::new(MainError::Runtime {
+            value: format!("{}", e),
+        })
+    })?
     .run();
 
     Ok(server)
@@ -110,12 +125,16 @@ pub struct Application {
 }
 
 impl Application {
-    pub async fn build(config: &Config) -> Result<Self, anyhow::Error> {
+    pub async fn build(config: &Config) -> Result<Self, Report<MainError>> {
         let pgpool = get_pgconnect_pool(&config.database);
         let address = format!("{}:{}", config.application.host, config.application.port);
-        let listener = TcpListener::bind(&address)?;
+        let listener = TcpListener::bind(&address).map_err(|e| {
+            Report::new(MainError::Runtime {
+                value: format!("{}", e),
+            })
+        })?;
         let port = listener.local_addr().unwrap().port();
-        let email_client = config.email_client.client();
+        let email_client = config.email_client.client()?;
 
         let app_params = AppRunParams {
             listener,

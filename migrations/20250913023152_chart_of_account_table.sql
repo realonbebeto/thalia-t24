@@ -1,9 +1,11 @@
+BEGIN;
 CREATE TYPE chart_account_type AS ENUM (
     'asset',
-    'liability',
     'equity',
+    'expense',
     'income',
-    'expense'
+    'liability',
+    'memoranda'
 );
 CREATE TABLE chart_of_account(
     "id" UUID,
@@ -14,3 +16,4 @@ CREATE TABLE chart_of_account(
     "created_at" timestamptz(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY(id)
 );
+COMMIT;

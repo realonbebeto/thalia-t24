@@ -10,13 +10,13 @@ pub async fn db_create_user_account(
     tx: &mut Transaction<'_, Postgres>,
     user_account: &UserAccount,
 ) -> Result<(), sqlx::Error> {
-    sqlx::query("INSERT INTO user_account(id, user_id, account_number, iban, account_type, coa_id, branch_id, currency, status) 
+    sqlx::query("INSERT INTO user_account(id, user_id, account_number, iban, account_class, coa_id, branch_id, currency, status) 
     VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9)")
     .bind(user_account.id)
     .bind(user_account.user_id)
     .bind(&user_account.account_number)
     .bind(&user_account.iban)
-    .bind(&user_account.account_type)
+    .bind(user_account.account_class)
     .bind(user_account.coa_id)
     .bind(user_account.branch_id)
     .bind(&user_account.currency)

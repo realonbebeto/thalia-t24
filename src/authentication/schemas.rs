@@ -107,7 +107,7 @@ impl SessionMetadata {
         expiry: u64,
         username: &str,
         persissions: AccessLevel,
-    ) -> Result<Self, BaseError> {
+    ) -> Result<Self, Report<BaseError>> {
         let exp = to_unix_expiry(expiry)?;
         let iat = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -145,7 +145,7 @@ impl TokenClaims {
         expiry: u64,
         username: &str,
         persissions: AccessLevel,
-    ) -> Result<Self, BaseError> {
+    ) -> Result<Self, Report<BaseError>> {
         let exp = to_unix_expiry(expiry)?;
         let iat = SystemTime::now()
             .duration_since(UNIX_EPOCH)

@@ -1,10 +1,13 @@
+mod account_type;
 mod invalid_user;
 mod test_user;
-pub use invalid_user::create_invalid_user;
-
-use crate::base::test_user::TestUsers;
+use crate::base::{
+    account_type::{AccountClasses, Coas},
+    test_user::TestUsers,
+};
 use error_stack::ResultExt;
 use getset::Getters;
+pub use invalid_user::create_invalid_user;
 use once_cell::sync::Lazy;
 use sqlx::{Connection, Executor, PgConnection, PgPool};
 use thalia::{
@@ -31,6 +34,8 @@ pub struct TestApp {
     email_server: MockServer,
     port: u16,
     test_users: TestUsers,
+    account_classes: AccountClasses,
+    coas: Coas,
     api_client: reqwest::Client,
     test_idem_expiration: u64,
     email_client: EmailClient,
@@ -45,6 +50,8 @@ impl TestApp {
         email_server: MockServer,
         port: u16,
         test_users: TestUsers,
+        account_classes: AccountClasses,
+        coas: Coas,
         api_client: reqwest::Client,
         test_idem_expiration: u64,
         email_client: EmailClient,
@@ -57,6 +64,8 @@ impl TestApp {
             email_server,
             port,
             test_users,
+            account_classes,
+            coas,
             api_client,
             test_idem_expiration,
             email_client,
@@ -232,6 +241,8 @@ pub async fn spawn_app() -> TestApp {
     let address = format!("http://127.0.0.1:{}", port);
     let _ = tokio::spawn(app.run_until_stopped());
     let test_users = TestUsers::generate_users();
+    let coas = Coas::default();
+    let account_classes = AccountClasses::default(&coas);
 
     let api_client = reqwest::Client::builder()
         .cookie_store(true)
@@ -246,9 +257,11 @@ pub async fn spawn_app() -> TestApp {
         email_server,
         port,
         test_users,
+        account_classes,
+        coas,
         api_client,
         config.expiration.idempotency_expiration_secs,
-        config.email_client.client(),
+        config.email_client.client().unwrap(),
     );
 
     test_app

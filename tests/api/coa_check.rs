@@ -10,8 +10,8 @@ async fn valid_coa_creation_by_logged_in_staff_returns_200() {
 
     // Login
     let login_body = serde_json::json!({"username": app.get_test_users().get_staff().get_username().as_ref(), 
-    "email": app.get_test_users().get_staff().get_email().as_ref(), 
-    "password": app.get_test_users().get_staff().get_password().as_ref()});
+                                                "email": app.get_test_users().get_staff().get_email().as_ref(), 
+                                                "password": app.get_test_users().get_staff().get_password().as_ref()});
     app.post_staff_login(&login_body).await;
 
     let coa_body = serde_json::json!({"name": "Cash in Vault", "code":"21022", "coa_type":"asset", "currency":"USD"});

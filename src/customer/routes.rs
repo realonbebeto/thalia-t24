@@ -1,9 +1,5 @@
 use crate::account::repo::db_get_balance_by_user_account_id;
-use crate::account::service::create_user_account;
-use crate::account::{
-    models::AccountType,
-    schemas::{UserAccountBalance, UserAccountCreateRequest},
-};
+use crate::account::schemas::UserAccountBalance;
 use crate::authentication::schemas::SessionMetadata;
 use crate::authentication::{
     create_activate_token, create_token,
@@ -21,7 +17,6 @@ use crate::user::schemas::UserCreateRequest;
 use actix_web::{HttpResponse, cookie::Cookie, http::header, web};
 use actix_web_flash_messages::FlashMessage;
 use chrono::offset::Utc;
-use isocountry::CountryCode;
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -113,7 +108,8 @@ pub async fn customer_login(
                 expiration.session_expiration,
                 &username,
                 AccessLevel::Customer,
-            )?;
+            )
+            .map_err(|e| e.current_context().clone())?;
 
             session.renew();
 
@@ -151,10 +147,10 @@ pub async fn customer_login(
                 .json(StdResponse::from("Customer Login Successful")))
         }
 
-        Err(e) => match e {
+        Err(e) => match e.current_context() {
             BaseError::InvalidCredentials { message } => {
                 FlashMessage::info(format!("Customer login unsuccessful: {}", message)).send();
-                Ok(HttpResponse::Unauthorized().json(StdResponse::from(&message)))
+                Ok(HttpResponse::Unauthorized().json(StdResponse::from(message)))
             }
             _ => {
                 FlashMessage::error("Internal Server Error").send();
@@ -174,30 +170,6 @@ pub async fn upload_user_docs() {}
 // Used to confirm if a user has been verified
 #[utoipa::path(post, path="/user/{id}/kyc", responses((status=200, body=StdResponse, description="Successfull verification"), (status=409, description="Verification failed")))]
 pub async fn customer_profile_status() {}
-
-#[tracing::instrument("Open customer account", skip(pool))]
-#[utoipa::path(post, path="/account", responses((status=200, body=StdResponse, description="Successfull bank account opening"), (status=409, description="Opening bank account failed")))]
-pub async fn open_customer_account(
-    pool: web::Data<PgPool>,
-    request: web::Json<UserAccountCreateRequest>,
-) -> actix_web::Result<HttpResponse> {
-    let request = request.into_inner();
-    let country_code = CountryCode::for_id(request.country_code).to_badrequest()?;
-    let account_type: AccountType = request.account_type.try_into().to_badrequest()?;
-
-    create_user_account(
-        &pool,
-        request.user_id,
-        request.branch_id,
-        request.account_id,
-        account_type,
-        country_code,
-    )
-    .await
-    .to_internal()?;
-
-    Ok(HttpResponse::Ok().json(StdResponse::from("Successfull bank account opening")))
-}
 
 #[tracing::instrument("Fetch balance", skip(pool))]
 #[utoipa::path(get, path="/balance/{account_id}", responses((status=200, body=UserAccountBalance, description="Successfull balance check"), (status=409, description="Failed balance check")))]

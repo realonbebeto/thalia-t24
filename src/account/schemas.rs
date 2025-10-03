@@ -6,7 +6,7 @@ pub struct UserAccountCreateRequest {
     pub user_id: Uuid,
     pub branch_id: Uuid,
     pub account_id: Uuid,
-    pub account_type: String,
+    pub account_class: Uuid,
     pub country_code: u32,
 }
 

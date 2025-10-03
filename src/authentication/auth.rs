@@ -65,7 +65,7 @@ fn verify_password(expected_password: &str, password: &str) -> Result<(), Report
 pub async fn validate_credentials(
     pool: &PgPool,
     credentials: Credentials,
-) -> Result<(Uuid, String), BaseError> {
+) -> Result<(Uuid, String), Report<BaseError>> {
     let mut user_id: Option<Uuid> = None;
     let mut user_name = String::from("1");
     // Used to limit timing attack
@@ -110,13 +110,13 @@ pub async fn validate_credentials(
     {
         match e.current_context() {
             PasswordError::BadPassword | PasswordError::ParseError => {
-                return Err(BaseError::InvalidCredentials {
+                return Err(Report::new(BaseError::InvalidCredentials {
                     message: "Wrong password or username".into(),
-                });
+                }));
             }
 
             _ => {
-                return Err(BaseError::Internal);
+                return Err(Report::new(BaseError::Internal));
             }
         }
     }
@@ -125,9 +125,9 @@ pub async fn validate_credentials(
         return Ok((id, user_name));
     }
 
-    Err(BaseError::InvalidCredentials {
+    Err(Report::new(BaseError::InvalidCredentials {
         message: "Wrong password or username".into(),
-    })
+    }))
 }
 
 #[tracing::instrument("Create activate token", skip(user_id, email, expiry, secret_key))]
@@ -137,7 +137,7 @@ pub fn create_activate_token(
     expiry: u64,
     secret_key: &str,
     role: AccessLevel,
-) -> Result<String, BaseError> {
+) -> Result<String, Report<BaseError>> {
     let expiry = to_unix_expiry(expiry)?;
     let claims = ActivateClaims::new(email.into(), user_id, expiry, role);
 
@@ -146,7 +146,7 @@ pub fn create_activate_token(
         &claims,
         &EncodingKey::from_secret(secret_key.as_ref()),
     )
-    .map_err(|e| e.into_kind())?;
+    .map_err(|e| BaseError::from(e.into_kind()))?;
     Ok(token)
 }
 

@@ -1,7 +1,7 @@
-use crate::admin::models::{ChartAccount, CustomerAccountType};
-use crate::admin::repo::{db_create_account_type, db_create_chart_account, db_get_coa_by_code};
-use crate::admin::schemas::{AccountTypeRequest, ChartAccountRequest};
 use crate::base::error::BaseError;
+use crate::staff::models::{ChartAccount, CustomerAccountType};
+use crate::staff::repo::{db_create_account_type, db_create_chart_account, db_get_coa_by_code};
+use crate::staff::schemas::{AccountTypeRequest, ChartAccountRequest};
 use error_stack::{Report, ResultExt};
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -28,18 +28,18 @@ pub async fn account_type_creation(
 pub async fn chart_account_creation(
     pool: &PgPool,
     request: ChartAccountRequest,
-) -> Result<(), BaseError> {
+) -> Result<(), Report<BaseError>> {
     let coa = ChartAccount::new(
         Uuid::now_v7(),
         &request.code,
-        request.name,
+        &request.name,
         request
             .coa_type
             .try_into()
             .change_context(BaseError::BadRequest {
                 message: "Wrong chart account type".into(),
             })?,
-        request.currency,
+        &request.currency,
     );
 
     if db_get_coa_by_code(pool, &request.code)

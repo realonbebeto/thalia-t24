@@ -1,0 +1,102 @@
+code,name,coa_type,currency
+1000,Cash and Due from Banks,Asset,USD
+1010,Cash in Vault,Asset,USD
+1020,Deposits with Central Bank,Asset,USD
+1030,Nostro Accounts,Asset,USD
+1040,Clearing Accounts,Asset,USD
+1050,ATMs and Cash Dispensers,Asset,USD
+1100,Trading Securities,Asset,USD
+1110,Government Bonds (Trading),Asset,USD
+1120,Corporate Bonds (Trading),Asset,USD
+1200,Available-for-Sale (AFS) Securities,Asset,USD
+1210,Government Bonds (AFS),Asset,USD
+1220,Municipal Bonds (AFS),Asset,USD
+1300,Held-to-Maturity (HTM) Securities,Asset,USD
+1310,Treasury Bills (HTM),Asset,USD
+1400,Loans to Customers,Asset,USD
+1410,Residential Mortgages,Asset,USD
+1411,Fixed-Rate Mortgages,Asset,USD
+1412,Adjustable-Rate Mortgages (ARMs),Asset,USD
+1420,Commercial Loans,Asset,USD
+1421,Term Loans,Asset,USD
+1422,Revolving Credit,Asset,USD
+1430,Consumer Loans,Asset,USD
+1440,Overdrafts,Asset,USD
+1450,Loans to Financial Institutions,Asset,USD
+1460,Non-Performing Loans (NPLs),Asset,USD
+1500,Derivatives (Asset Side),Asset,USD
+1510,Interest Rate Swaps (Asset),Asset,USD
+1600,Fixed Assets,Asset,USD
+1610,Premises and Equipment,Asset,USD
+1620,Leasehold Improvements,Asset,USD
+1700,Intangible Assets,Asset,USD
+1710,Goodwill,Asset,USD
+1720,Software Licenses,Asset,USD
+1800,Other Assets,Asset,USD
+1810,Prepaid Expenses,Asset,USD
+1820,Deferred Tax Assets,Asset,USD
+1830,Accrued Interest Receivable,Asset,USD
+2000,Customer Deposits,Liability,USD
+2010,Demand Deposits,Liability,USD
+2020,Savings Deposits,Liability,USD
+2030,Time Deposits,Liability,USD
+2040,Foreign Currency Deposits,Liability,USD
+2050,Customer Withdrawal,Liability,USD
+2100,Borrowed Funds,Liability,USD
+2110,Short-Term Borrowings,Liability,USD
+2120,Long-Term Debt,Liability,USD
+2130,Subordinated Debt,Liability,USD
+2140,Repurchase Agreements (Repos),Liability,USD
+2200,Derivatives (Liability Side),Liability,USD
+2210,Interest Rate Swaps (Liability),Liability,USD
+2300,Accrued Expenses,Liability,USD
+2310,Salaries and Benefits Payable,Liability,USD
+2320,Interest Payable,Liability,USD
+2400,Deferred Revenue,Liability,USD
+3000,Shareholders' Equity,Equity,USD
+3010,Common Stock,Equity,USD
+3020,Preferred Stock,Equity,USD
+3030,Additional Paid-in Capital,Equity,USD
+3100,Retained Earnings,Equity,USD
+3110,Accumulated Other Comprehensive Income (AOCI),Equity,USD
+3200,Reserves,Equity,USD
+3210,Legal Reserve,Equity,USD
+3220,General Reserve,Equity,USD
+4000,Interest Income,Income,USD
+4010,Interest on Loans,Income,USD
+4020,Interest on Securities,Income,USD
+4030,Interest on Deposits with Banks,Income,USD
+4100,Fee and Commission Income,Income,USD
+4110,Loan Fees,Income,USD
+4120,Service Charges,Income,USD
+4130,Wealth Management Fees,Income,USD
+4200,Trading Income,Income,USD
+4210,Net Gains on Trading Securities,Income,USD
+4220,Foreign Exchange Gains,Income,USD
+4300,Other Operating Income,Income,USD
+4310,Recovery of Written-Off Loans,Income,USD
+5000,Interest Expense,Expense,USD
+5010,Interest on Customer Deposits,Expense,USD
+5020,Interest on Borrowed Funds,Expense,USD
+5100,Personnel Expenses,Expense,USD
+5110,Salaries and Wages,Expense,USD
+5120,Employee Benefits,Expense,USD
+5200,Administrative Expenses,Expense,USD
+5210,Rent and Utilities,Expense,USD
+5220,Professional Fees,Expense,USD
+5230,IT and Software Costs,Expense,USD
+5300,Loan Loss Provision,Expense,USD
+5310,Specific Provision,Expense,USD
+5320,General Provision,Expense,USD
+5400,Other Expenses,Expense,USD
+5410,Marketing and Advertising,Expense,USD
+5420,Depreciation and Amortization,Expense,USD
+5430,Tax Expense,Expense,USD
+6000,Contingent Liabilities,Memoranda,USD
+6010,Letters of Credit,Memoranda,USD
+6020,Guarantees,Memoranda,USD
+6030,Undrawn Loan Commitments,Memoranda,USD
+6100,Derivative Contracts (Notional Value),Memoranda,USD
+7000,Regulatory Capital Adjustments,Memoranda,USD
+7010,Risk-Weighted Assets (RWA),Memoranda,USD
+7020,Capital Deductions,Memoranda,USD

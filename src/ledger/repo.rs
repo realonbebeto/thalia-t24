@@ -66,10 +66,11 @@ pub async fn db_add_ledger_journal_entry(
     tx: &mut Transaction<'_, Postgres>,
     journal_entry: &JournalEntry,
 ) -> Result<(), sqlx::Error> {
-    sqlx::query("INSERT INTO journal_entry(id, user_account_id, transaction_id, transaction_ref, description) VALUES($1, $2, $3)")
+    sqlx::query("INSERT INTO journal_entry(id, user_account_id, transaction_id, transaction_ref, description) VALUES($1, $2, $3, $4, $5)")
         .bind(journal_entry.get_id())
         .bind(journal_entry.get_user_account_id())
         .bind(journal_entry.get_transaction_id())
+        .bind(journal_entry.get_transaction_ref())
         .bind(journal_entry.get_description())
         .execute(&mut **tx)
         .await

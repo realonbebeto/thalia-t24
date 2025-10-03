@@ -1,9 +1,8 @@
 use crate::base::StdResponse;
 use actix_web::HttpResponse;
-use error_stack::Report;
 use jsonwebtoken::errors::ErrorKind;
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, Clone)]
 pub enum ValidationError {
     #[error("Email is not valid")]
     InvalidEmail,
@@ -108,13 +107,6 @@ impl actix_web::ResponseError for BaseError {
 
 type Result<T> = std::result::Result<T, BaseError>;
 
-// Important to convert Report<BaseError> to AppError automatically
-impl From<Report<BaseError>> for BaseError {
-    fn from(value: Report<BaseError>) -> Self {
-        value.current_context().clone()
-    }
-}
-
 pub trait ErrorExt<T> {
     fn to_internal(self) -> Result<T>;
     fn to_badrequest(self) -> Result<T>;
@@ -169,4 +161,11 @@ impl From<ErrorKind> for BaseError {
             _ => Self::Internal,
         }
     }
+}
+
+// MainError
+#[derive(Debug, thiserror::Error, Clone, serde::Serialize)]
+pub enum MainError {
+    #[error("{value}")]
+    Runtime { value: String },
 }

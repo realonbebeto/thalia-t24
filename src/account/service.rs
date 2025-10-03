@@ -1,9 +1,9 @@
-use crate::account::models::{AccountType, UserAccount, UserAccountStatus};
+use crate::account::models::{UserAccount, UserAccountStatus};
 use crate::account::repo::{db_create_user_account, db_start_account_balance};
-use crate::admin::{models::CoaType, repo::db_get_coa_id_by_coa_type};
 use crate::base::error::BaseError;
 use crate::ledger::models::{CreditLine, DebitLine, IntoJournalLine, JournalEntry, LineType};
 use crate::ledger::repo::{db_add_ledger_journal_entry, db_add_ledger_journal_line};
+use crate::staff::{models::CoaType, repo::db_get_coa_id_by_coa_type};
 use crate::telemetry::TraceError;
 use crate::transaction::service::generate_transaction_id;
 use error_stack::{Report, ResultExt};
@@ -33,7 +33,7 @@ pub async fn create_user_account(
     user_id: Uuid,
     branch_id: Uuid,
     coa_id: Uuid,
-    account_type: AccountType,
+    account_class: Uuid,
     country_code: CountryCode,
 ) -> Result<(), Report<BaseError>> {
     let mut tx = pool
@@ -47,12 +47,13 @@ pub async fn create_user_account(
         user_id,
         account_number: generate_account_number(),
         iban: generate_iban(&country_code),
-        account_type,
+        account_class,
         coa_id,
         branch_id,
         currency: Country::US.to_string(),
         status: UserAccountStatus::Pending,
     };
+
     db_create_user_account(&mut tx, &user_account)
         .await
         .change_context(BaseError::Internal)?;
@@ -82,6 +83,7 @@ pub async fn create_user_account(
     db_add_ledger_journal_entry(&mut tx, &journal_entry)
         .await
         .change_context(BaseError::Internal)?;
+
     db_add_ledger_journal_line(&mut tx, journal_line)
         .await
         .change_context(BaseError::Internal)?;

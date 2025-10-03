@@ -1,4 +1,4 @@
-use crate::admin::models::{ChartAccount, CoaType, CustomerAccountType};
+use crate::staff::models::{ChartAccount, CoaType, CustomerAccountType};
 use crate::telemetry::TraceError;
 use sqlx::{PgPool, Postgres, Row, Transaction};
 use uuid::Uuid;
@@ -25,7 +25,7 @@ pub async fn db_get_coa_id_by_coa_type(
     tx: &mut Transaction<'_, Postgres>,
     coa_type: CoaType,
 ) -> Result<Uuid, sqlx::Error> {
-    let result = sqlx::query("SELECT coa_id FROM user_account WHERE coa_type=$1")
+    let result = sqlx::query("SELECT id FROM chart_of_account WHERE coa_type=$1")
         .bind(&coa_type)
         .fetch_optional(&mut **tx)
         .await
@@ -36,7 +36,7 @@ pub async fn db_get_coa_id_by_coa_type(
 
     match result {
         Some(r) => {
-            let r = r.get::<Uuid, _>("coa_id");
+            let r = r.get::<Uuid, _>("id");
             Ok(r)
         }
         None => Err(sqlx::Error::RowNotFound)
@@ -49,14 +49,16 @@ pub async fn db_create_account_type(
     pool: &PgPool,
     acc_type: &CustomerAccountType,
 ) -> Result<(), sqlx::Error> {
-    sqlx::query("INSERT INTO chart_account(id, name, description, coa_id) VALUES($1, $2, $3, $4)")
-        .bind(acc_type.id)
-        .bind(&acc_type.name)
-        .bind(&acc_type.description)
-        .bind(acc_type.coa_id)
-        .execute(pool)
-        .await
-        .trace_with("Error while inserting account type")?;
+    sqlx::query(
+        "INSERT INTO chart_of_account(id, name, description, coa_id) VALUES($1, $2, $3, $4)",
+    )
+    .bind(acc_type.id)
+    .bind(&acc_type.name)
+    .bind(&acc_type.description)
+    .bind(acc_type.coa_id)
+    .execute(pool)
+    .await
+    .trace_with("Error while inserting account type")?;
     Ok(())
 }
 

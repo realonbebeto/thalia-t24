@@ -1,6 +1,10 @@
 use crate::base::Email;
+use crate::base::error::MainError;
+use crate::base::error::ValidationError;
 use crate::notification::email_client::EmailClient;
 use envconfig::Envconfig;
+use error_stack::Report;
+use error_stack::ResultExt;
 use sqlx::ConnectOptions;
 use sqlx::postgres::PgConnectOptions;
 use sqlx::postgres::PgSslMode;
@@ -113,9 +117,13 @@ pub struct Config {
     pub email_client: EmailClientSettings,
 }
 
-pub fn get_config() -> Result<Config, envconfig::Error> {
+pub fn get_config() -> Result<Config, Report<MainError>> {
     // Init config reader
-    let config = Config::init_from_env().expect("Failed to parse required app env variables");
+    let config = Config::init_from_env().map_err(|e| {
+        Report::new(MainError::Runtime {
+            value: format!("{}", e),
+        })
+    })?;
 
     Ok(config)
 }
@@ -139,16 +147,20 @@ pub struct EmailClientSettings {
 }
 
 impl EmailClientSettings {
-    pub fn sender(&self) -> Result<Email, anyhow::Error> {
-        Ok(Email::parse(self.sender_email.clone()).expect("Failed to parse sender email"))
+    pub fn sender(&self) -> Result<Email, Report<ValidationError>> {
+        Email::parse(self.sender_email.clone()).attach("Failed to parse sender email")
     }
 
     pub fn timeout(&self) -> std::time::Duration {
         std::time::Duration::from_millis(self.timeout_milliseconds)
     }
 
-    pub fn client(&self) -> EmailClient {
-        let sender_email = self.sender().expect("Invalid sender email address");
+    pub fn client(&self) -> Result<EmailClient, Report<MainError>> {
+        let sender_email = self.sender().map_err(|e| {
+            Report::new(MainError::Runtime {
+                value: format!("{}", e),
+            })
+        })?;
         let timeout = self.timeout();
 
         EmailClient::new(
@@ -158,6 +170,10 @@ impl EmailClientSettings {
             &self.public_email_key,
             timeout,
         )
-        .expect("Failed to setup email client")
+        .map_err(|e| {
+            Report::new(MainError::Runtime {
+                value: format!("{}", e),
+            })
+        })
     }
 }

@@ -1,7 +1,3 @@
-use crate::admin::{
-    schemas::{AccountTypeRequest, ChartAccountRequest},
-    service::{account_type_creation, chart_account_creation},
-};
 use crate::authentication::{
     SessionType, StaffSession, create_activate_token, create_token,
     repo::db_store_token,
@@ -17,6 +13,10 @@ use crate::base::{
 };
 use crate::config::Expiration;
 use crate::notification::email_client::EmailClient;
+use crate::staff::{
+    schemas::{AccountTypeRequest, ChartAccountRequest},
+    service::{account_type_creation, chart_account_creation},
+};
 use crate::user::{
     models::{CustomerUser, StaffUser},
     repo::{db_confirm_user, db_create_user, db_get_user},
@@ -28,7 +28,7 @@ use sqlx::PgPool;
 
 #[tracing::instrument("Staff signup", skip(pool, request, secret_key), fields(username=%request.username, user_email=%request.email))]
 #[utoipa::path(post, path="/signup", responses((status=200, body=StdResponse, description="User created successfully"), (status=409, description="User already exists")))]
-// Signup admin accounts
+// Signup staff accounts
 pub async fn staff_signup(
     pool: web::Data<PgPool>,
     secret_key: web::Data<SecretKey>,
@@ -132,7 +132,8 @@ pub async fn staff_login(
                 expiration.session_expiration,
                 &username,
                 AccessLevel::Superuser,
-            )?;
+            )
+            .map_err(|e| e.current_context().clone())?;
 
             session.renew();
 
@@ -170,10 +171,10 @@ pub async fn staff_login(
                 .json(StdResponse::from("Staff Login Successful")))
         }
 
-        Err(e) => match e {
+        Err(e) => match e.current_context() {
             BaseError::InvalidCredentials { message } => {
                 FlashMessage::info(format!("Staff login unsuccessful: {}", message)).send();
-                Ok(HttpResponse::Unauthorized().json(StdResponse::from(&message)))
+                Ok(HttpResponse::Unauthorized().json(StdResponse::from(message)))
             }
             _ => {
                 FlashMessage::error("Internal Server Error").send();
@@ -184,7 +185,7 @@ pub async fn staff_login(
     }
 }
 
-// An admin can create an account for a customer
+// A Staff can create an account for a customer
 #[tracing::instrument("Staff opening customer account", skip(pool, request), fields(username=%request.username, user_email=%request.email))]
 #[utoipa::path(post, path="/user/signup", responses((status=200, body=StdResponse, description="User created successfully"), (status=409, description="User already exists")))]
 pub async fn create_customer_account(
@@ -245,7 +246,9 @@ pub async fn create_chart_account(
     pool: web::Data<PgPool>,
     request: web::Json<ChartAccountRequest>,
 ) -> actix_web::Result<HttpResponse> {
-    chart_account_creation(&pool, request.into_inner()).await?;
+    chart_account_creation(&pool, request.into_inner())
+        .await
+        .map_err(|e| e.current_context().clone())?;
     Ok(HttpResponse::Ok().json(StdResponse::from("Chart account created successfully")))
 }
 
