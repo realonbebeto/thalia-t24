@@ -1,0 +1,2 @@
+ALTER TABLE activate_token
+ALTER COLUMN "token" TYPE VARCHAR(300);
