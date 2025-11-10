@@ -4,4 +4,3 @@ pub mod repo;
 pub mod routes;
 pub mod schemas;
 pub mod service;
-pub mod util;

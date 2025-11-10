@@ -1,27 +1,28 @@
-use error_stack::Report;
 use getset::Getters;
 use sqlx::FromRow;
 use uuid::Uuid;
 
-#[derive(Debug, thiserror::Error)]
-pub enum TRRefError {
-    #[error("Invalid transaction reference: {message}")]
-    Invalid { message: String },
-}
+use crate::base::error::ValidationError;
 
 pub struct TransactionRef(String);
 
 impl TryFrom<String> for TransactionRef {
-    type Error = Report<TRRefError>;
+    type Error = ValidationError;
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
         if value.is_empty() {
-            return Err(Report::new(TRRefError::Invalid { message: value }));
+            return Err(ValidationError::InvalidValue {
+                field: "transaction_ref".into(),
+                reason: "transaction_ref is empty".into(),
+            });
         }
 
         let max_length = 50;
         if value.len() > max_length {
-            return Err(Report::new(TRRefError::Invalid { message: value }));
+            return Err(ValidationError::TooLong {
+                field: "transaction_ref".into(),
+                max: 50,
+            });
         }
 
         Ok(Self(value))

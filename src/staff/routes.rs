@@ -1,254 +1,95 @@
-use crate::authentication::{
-    SessionType, StaffSession, create_activate_token, create_token,
-    repo::db_store_token,
-    schemas::{
-        AccessLevel, Credentials, DefaultPassword, LoginRequest, SecretKey, SessionMetadata,
-    },
-    validate_activate_token, validate_credentials,
-};
-use crate::base::{
-    StdResponse,
-    error::{BaseError, ErrorExt},
-    schemas::AppBaseUri,
-};
-use crate::config::Expiration;
-use crate::notification::email_client::EmailClient;
+use actix_web::{HttpResponse, cookie::Cookie, http::header, web};
+
+use crate::authentication::{StaffSession, schemas::LoginRequest, service::AuthService};
+use crate::base::StdResponse;
+use crate::config::state::AppState;
 use crate::staff::{
     schemas::{AccountTypeRequest, ChartAccountRequest},
-    service::{account_type_creation, chart_account_creation},
+    service::StaffService,
 };
-use crate::user::{
-    models::{CustomerUser, StaffUser},
-    repo::{db_confirm_user, db_create_user, db_get_user},
-    schemas::UserCreateRequest,
-};
-use actix_web::{HttpResponse, cookie::Cookie, http::header, web};
-use actix_web_flash_messages::FlashMessage;
-use sqlx::PgPool;
+use crate::user::{schemas::UserRegisterRequest, service::UserService};
 
-#[tracing::instrument("Staff signup", skip(pool, request, secret_key), fields(username=%request.username, user_email=%request.email))]
+#[tracing::instrument("Staff signup", skip(app_state, request), fields(username=%request.username, user_email=%request.email))]
 #[utoipa::path(post, path="/signup", responses((status=200, body=StdResponse, description="User created successfully"), (status=409, description="User already exists")))]
 // Signup staff accounts
 pub async fn staff_signup(
-    pool: web::Data<PgPool>,
-    secret_key: web::Data<SecretKey>,
-    expiry: web::Data<Expiration>,
-    email_client: web::Data<EmailClient>,
-    app_address: web::Data<AppBaseUri>,
-    request: web::Json<UserCreateRequest>,
+    app_state: web::Data<AppState>,
+    request: web::Json<UserRegisterRequest>,
 ) -> actix_web::Result<HttpResponse> {
-    let user: StaffUser = request.into_inner().try_into().to_badrequest()?;
-    let user = user.0;
+    let user_service = UserService::from(&app_state);
+    user_service.create_user(request.into_inner()).await?;
 
-    tracing::info!("Checking if the user already exists");
-    if db_get_user(&pool, user.email.as_ref())
-        .await
-        .to_internal()?
-        .is_some()
-    {
-        tracing::warn!(email = %user.email, "Attempted to create user but it already exists");
-        return Ok(HttpResponse::Conflict().json(StdResponse::from("User already exists")));
-    }
-
-    let mut tx = pool.begin().await.to_internal()?;
-
-    db_create_user(&mut tx, &user).await.to_internal()?;
-    tracing::info!("User created");
-
-    let activate_token = create_activate_token(
-        user.id,
-        user.email.as_ref(),
-        expiry.into_inner().activate_token_expire_secs,
-        &secret_key.into_inner().0,
-        AccessLevel::Superuser,
-    )
-    .to_internal()?;
-
-    db_store_token(&mut tx, &activate_token, user.id, user.email.as_ref())
-        .await
-        .to_internal()?;
-
-    tracing::info!("User activate token generated and stored");
-
-    tx.commit().await.to_internal()?;
-
-    // Send Activate Email
-    email_client
-        .send_welcome_email(
-            &app_address.into_inner().0,
-            user.email,
-            "Welcome to Thalia Corp.",
-            user.first_name.as_ref(),
-            &activate_token,
-            "Thalia Corp.",
-        )
-        .await
-        .to_internal()?;
-
-    Ok(HttpResponse::Ok().json(StdResponse::from("User created successfully")))
+    Ok(HttpResponse::Ok().json(StdResponse::from("Customer created successfully")))
 }
 
 // activate account
-#[tracing::instrument("Confirm profile", skip(pool, req, secret_key))]
+#[tracing::instrument("Confirm profile", skip(app_state, req))]
 #[utoipa::path(get, path="/staff/confirm/{token}", responses((status=200, body=StdResponse, description="User activated successfully"), (status=409, description="User activation failed")))]
 pub async fn confirm_staff(
-    pool: web::Data<PgPool>,
+    app_state: web::Data<AppState>,
     req: web::Path<String>,
-    secret_key: web::Data<SecretKey>,
 ) -> actix_web::Result<HttpResponse> {
-    let (user_email, _, _) =
-        validate_activate_token(&req.into_inner(), &secret_key.into_inner().0).to_internal()?;
+    let auth_service = AuthService::from(&app_state);
 
-    db_confirm_user(&pool, &user_email).await.to_internal()?;
+    auth_service.verify_user_email(req.into_inner()).await?;
 
-    Ok(HttpResponse::Ok().json(StdResponse::from("Successful activation")))
+    Ok(HttpResponse::Ok().json(StdResponse::from("Successful confirmation")))
 }
 
-#[tracing::instrument("Staff login", skip(payload, pool, session, default_pass, secret_key))]
+#[tracing::instrument("Staff login", skip(app_state, payload, session))]
 #[utoipa::path(post, path="/login", responses((status=200, body=StdResponse, description="Staff login successful"), (status=401, description="Staff login unsuccessful")))]
 
 pub async fn staff_login(
-    pool: web::Data<PgPool>,
-    secret_key: web::Data<SecretKey>,
-    default_pass: web::Data<DefaultPassword>,
-    expiration: web::Data<Expiration>,
+    app_state: web::Data<AppState>,
     payload: web::Json<LoginRequest>,
     session: StaffSession,
 ) -> actix_web::Result<HttpResponse> {
-    let secret_key = &secret_key.into_inner().0;
+    let auth_service = AuthService::from(&app_state);
 
-    if payload.non_empty_email_username() {
-        return Ok(HttpResponse::BadRequest().json(StdResponse::from("Email/Username is empty")));
-    }
+    let (access_token, refresh_token) = auth_service
+        .authenticate_user(payload.into_inner(), session)
+        .await?;
 
-    let credentials =
-        Credentials::from(payload.into_inner(), &default_pass.into_inner().0).to_badrequest()?;
-
-    match validate_credentials(&pool, credentials).await {
-        Ok((staff_id, username)) => {
-            tracing::Span::current().record("staff_id", tracing::field::display(staff_id));
-            let user_session = SessionMetadata::new(
-                staff_id,
-                expiration.session_expiration,
-                &username,
-                AccessLevel::Superuser,
-            )
-            .map_err(|e| e.current_context().clone())?;
-
-            session.renew();
-
-            session
-                .insert_sesh_user(user_session)
-                .map_err(|_| BaseError::internal())?;
-
-            FlashMessage::info("Staff Authorized").send();
-
-            let access_token = create_token(
-                staff_id,
-                &username,
-                AccessLevel::Superuser,
-                expiration.access_token_expire_secs,
-                secret_key,
-            )
-            .to_internal()?;
-
-            let refresh_token = create_token(
-                staff_id,
-                &username,
-                AccessLevel::Superuser,
-                expiration.refresh_token_expire_secs,
-                secret_key,
-            )
-            .to_internal()?;
-
-            Ok(HttpResponse::Ok()
-                .insert_header((header::AUTHORIZATION, format!("Bearer {}", access_token)))
-                .cookie(
-                    Cookie::build("refresh_token", refresh_token)
-                        .http_only(true)
-                        .finish(),
-                )
-                .json(StdResponse::from("Staff Login Successful")))
-        }
-
-        Err(e) => match e.current_context() {
-            BaseError::InvalidCredentials { message } => {
-                FlashMessage::info(format!("Staff login unsuccessful: {}", message)).send();
-                Ok(HttpResponse::Unauthorized().json(StdResponse::from(message)))
-            }
-            _ => {
-                FlashMessage::error("Internal Server Error").send();
-                Ok(HttpResponse::InternalServerError()
-                    .json(StdResponse::from("Internal Server Error")))
-            }
-        },
-    }
+    Ok(HttpResponse::Ok()
+        .insert_header((header::AUTHORIZATION, format!("Bearer {}", access_token)))
+        .cookie(
+            Cookie::build("refresh_token", refresh_token)
+                .http_only(true)
+                .finish(),
+        )
+        .json(StdResponse::from("Staff Login Successful")))
 }
 
 // A Staff can create an account for a customer
-#[tracing::instrument("Staff opening customer account", skip(pool, request), fields(username=%request.username, user_email=%request.email))]
-#[utoipa::path(post, path="/user/signup", responses((status=200, body=StdResponse, description="User created successfully"), (status=409, description="User already exists")))]
+#[tracing::instrument("Staff opening customer account", skip(app_state, payload), fields(username=%payload.username, user_email=%payload.email))]
+#[utoipa::path(post, path="/user/signup", responses((status=200, body=StdResponse, description="Customer account created successfully"), (status=409, description="User already exists")))]
 pub async fn create_customer_account(
-    pool: web::Data<PgPool>,
-    request: web::Json<UserCreateRequest>,
-    secret_key: web::Data<SecretKey>,
-    expiry: web::Data<Expiration>,
+    app_state: web::Data<AppState>,
+    payload: web::Json<UserRegisterRequest>,
 ) -> actix_web::Result<HttpResponse> {
-    let user: CustomerUser = request.into_inner().try_into().to_badrequest()?;
-    let user = user.0;
+    let user_service = UserService::from(&app_state);
 
-    tracing::info!("Checking if the user already exists");
+    user_service.create_user(payload.into_inner()).await?;
 
-    if db_get_user(&pool, user.email.as_ref())
-        .await
-        .to_internal()?
-        .is_some()
-    {
-        tracing::warn!(email = %user.email, "Attempted to create user but it already exists");
-        return Ok(HttpResponse::Conflict().json(StdResponse::from("User already exists")));
-    }
-
-    let mut tx = pool.begin().await.to_internal()?;
-
-    db_create_user(&mut tx, &user).await.to_internal()?;
-    tracing::info!("User created");
-
-    // Generate activate token for customer
-    let activate_token = create_activate_token(
-        user.id,
-        user.email.as_ref(),
-        expiry.into_inner().activate_token_expire_secs,
-        &secret_key.into_inner().0,
-        AccessLevel::Customer,
-    )
-    .to_internal()?;
-
-    db_store_token(&mut tx, &activate_token, user.id, user.email.as_ref())
-        .await
-        .to_internal()?;
-
-    tracing::info!("Activate token created");
-
-    tx.commit().await.to_internal()?;
-
-    // TODO Send Email
-
-    Ok(HttpResponse::Ok().json(StdResponse::from("User created successfully")))
+    Ok(HttpResponse::Ok().json(StdResponse::from("Customer account created successfully")))
 }
 
 #[tracing::instrument("Staff updating customer profile")]
 #[utoipa::path(put, path="/user/", responses((status=200, body=StdResponse, description="User created successfully"), (status=409, description="User already exists")))]
 pub async fn update_customer_account() {}
 
-#[tracing::instrument("Staff creating new chart account", skip(pool, request))]
+#[tracing::instrument("Staff creating new chart account", skip(app_state, payload))]
 #[utoipa::path(post, path="/coa", responses((status=200, body=StdResponse, description="chart account created successfully"), (status=409, description="Chart account creation failed")))]
 pub async fn create_chart_account(
-    pool: web::Data<PgPool>,
-    request: web::Json<ChartAccountRequest>,
+    app_state: web::Data<AppState>,
+    payload: web::Json<ChartAccountRequest>,
 ) -> actix_web::Result<HttpResponse> {
-    chart_account_creation(&pool, request.into_inner())
-        .await
-        .map_err(|e| e.current_context().clone())?;
+    let staff_service = StaffService::from(&app_state);
+
+    staff_service
+        .chart_account_creation(payload.into_inner())
+        .await?;
+
     Ok(HttpResponse::Ok().json(StdResponse::from("Chart account created successfully")))
 }
 
@@ -256,15 +97,18 @@ pub async fn create_chart_account(
 #[utoipa::path(put, path="/coa", responses((status=200, body=StdResponse, description="chart account created successfully"), (status=409, description="Chart account creation failed")))]
 pub async fn update_chart_account() {}
 
-#[tracing::instrument("Staff creating account type")]
+#[tracing::instrument("Staff creating account type", skip(app_state))]
 #[utoipa::path(post, path="/account/type", responses((status=200, body=StdResponse, description="Account type created successfully"), (status=409, description="Account type creation failed")))]
 pub async fn create_account_type(
-    pool: web::Data<PgPool>,
-    request: web::Json<AccountTypeRequest>,
+    app_state: web::Data<AppState>,
+    payload: web::Json<AccountTypeRequest>,
 ) -> actix_web::Result<HttpResponse> {
-    account_type_creation(&pool, request.into_inner())
-        .await
-        .to_internal()?;
+    let staff_service = StaffService::from(&app_state);
+
+    staff_service
+        .account_type_creation(payload.into_inner())
+        .await?;
+
     Ok(HttpResponse::Ok().json(StdResponse::from("Account type created successfully")))
 }
 

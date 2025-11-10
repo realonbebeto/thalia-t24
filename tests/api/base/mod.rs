@@ -5,15 +5,15 @@ use crate::base::{
     account_type::{AccountClasses, Coas},
     test_user::TestUsers,
 };
-use error_stack::ResultExt;
+use anyhow::Context;
 use getset::Getters;
-pub use invalid_user::create_invalid_user;
+pub use invalid_user::{create_invalid_user, create_underage_user};
 use once_cell::sync::Lazy;
 use sqlx::{Connection, Executor, PgConnection, PgPool};
 use thalia::{
-    config::{DatabaseConfig, get_config},
+    config::runtime::{DatabaseConfig, Ttl, get_config},
     notification::email_client::EmailClient,
-    startup::{Application, get_pgconnect_pool},
+    startup::Application,
     telemetry::{get_tracing_subscriber, init_tracing_subscriber},
 };
 use uuid::Uuid;
@@ -24,57 +24,63 @@ pub struct StdResponse {
     pub message: String,
 }
 
+#[derive(Debug)]
+pub struct RunState {
+    pub address: String,
+    pub port: u16,
+    pub api_client: reqwest::Client,
+}
+
+#[derive(Debug)]
+pub struct DbState {
+    pub db_name: String,
+    pub pg_pool: PgPool,
+    pub connection: PgConnection,
+}
+
+#[derive(Debug)]
+pub struct MailState {
+    pub email_server: MockServer,
+    pub email_client: EmailClient,
+}
+
 #[derive(Debug, Getters)]
 #[get = "pub with_prefix"]
 pub struct TestApp {
-    address: String,
-    pg_pool: PgPool,
-    connection: PgConnection,
-    db_name: String,
-    email_server: MockServer,
-    port: u16,
-    test_users: TestUsers,
-    account_classes: AccountClasses,
-    coas: Coas,
-    api_client: reqwest::Client,
-    test_idem_expiration: u64,
-    email_client: EmailClient,
+    pub run_state: RunState,
+    pub db_state: DbState,
+    pub mail_state: MailState,
+    pub test_users: TestUsers,
+    pub account_classes: AccountClasses,
+    pub coas: Coas,
+    pub ttl: Ttl,
 }
 
 impl TestApp {
     fn new(
-        address: String,
-        pg_pool: PgPool,
-        connection: PgConnection,
-        db_name: String,
-        email_server: MockServer,
-        port: u16,
+        run_state: RunState,
+        db_state: DbState,
+        mail_state: MailState,
+        ttl: Ttl,
         test_users: TestUsers,
         account_classes: AccountClasses,
         coas: Coas,
-        api_client: reqwest::Client,
-        test_idem_expiration: u64,
-        email_client: EmailClient,
     ) -> Self {
         TestApp {
-            address,
-            pg_pool,
-            connection,
-            db_name,
-            email_server,
-            port,
+            run_state,
+            db_state,
+            mail_state,
             test_users,
             account_classes,
             coas,
-            api_client,
-            test_idem_expiration,
-            email_client,
+            ttl,
         }
     }
 
     pub async fn get_health(&self) -> reqwest::Response {
-        self.api_client
-            .get(&format!("{}/home/health", &self.address))
+        self.run_state
+            .api_client
+            .get(format!("{}/home/health", self.run_state.address))
             .send()
             .await
             .expect("Failed to execute")
@@ -84,8 +90,9 @@ impl TestApp {
     where
         Body: serde::Serialize,
     {
-        self.api_client
-            .post(&format!("{}/customer/signup", &self.address))
+        self.run_state
+            .api_client
+            .post(format!("{}/customer/signup", self.run_state.address))
             .json(body)
             .send()
             .await
@@ -96,8 +103,9 @@ impl TestApp {
     where
         Body: serde::Serialize,
     {
-        self.api_client
-            .post(&format!("{}/customer/login", &self.address))
+        self.run_state
+            .api_client
+            .post(format!("{}/customer/login", self.run_state.address))
             .json(body)
             .send()
             .await
@@ -108,8 +116,9 @@ impl TestApp {
     where
         Body: serde::Serialize,
     {
-        self.api_client
-            .post(&format!("{}/staff/login", &self.address))
+        self.run_state
+            .api_client
+            .post(format!("{}/staff/login", self.run_state.address))
             .json(body)
             .send()
             .await
@@ -120,8 +129,9 @@ impl TestApp {
     where
         Body: serde::Serialize,
     {
-        self.api_client
-            .post(&format!("{}/staff/signup", &self.address))
+        self.run_state
+            .api_client
+            .post(format!("{}/staff/signup", self.run_state.address))
             .json(body)
             .send()
             .await
@@ -132,8 +142,9 @@ impl TestApp {
     where
         Body: serde::Serialize,
     {
-        self.api_client
-            .post(&format!("{}/staff/coa", &self.address))
+        self.run_state
+            .api_client
+            .post(format!("{}/staff/coa", self.run_state.address))
             .json(body)
             .send()
             .await
@@ -141,8 +152,8 @@ impl TestApp {
     }
 
     pub async fn clear_test_db(&mut self) {
-        sqlx::query(format!(r#"DROP DATABASE "{}" WITH (FORCE);"#, self.db_name).as_str())
-            .execute(&mut self.connection)
+        sqlx::query(format!(r#"DROP DATABASE "{}" WITH (FORCE);"#, self.db_state.db_name).as_str())
+            .execute(&mut self.db_state.connection)
             .await
             .expect("Failed to drop database");
     }
@@ -196,19 +207,19 @@ async fn configure_db(config: &DatabaseConfig) -> (PgPool, PgConnection) {
     connection
         .execute(format!(r#"CREATE DATABASE "{}";"#, config.db_name).as_str())
         .await
-        .attach("Failed to create database")
+        .context("Failed to create database")
         .unwrap();
 
     // Run migrations
     let connection_pool = PgPool::connect_with(config.with_db())
         .await
-        .attach("Failed to connect to Postgres via pool")
+        .context("Failed to connect to Postgres via pool")
         .unwrap();
 
     sqlx::migrate!("./migrations")
         .run(&connection_pool)
         .await
-        .attach("Failed to migrate the test database")
+        .context("Failed to migrate the test database")
         .unwrap();
     (connection_pool, connection)
 }
@@ -231,7 +242,7 @@ pub async fn spawn_app() -> TestApp {
     };
 
     // Create and migrate test db
-    let (_, connection) = configure_db(&config.database).await;
+    let (pg_pool, connection) = configure_db(&config.database).await;
 
     let app = Application::build(&config)
         .await
@@ -239,7 +250,7 @@ pub async fn spawn_app() -> TestApp {
 
     let port = app.port();
     let address = format!("http://127.0.0.1:{}", port);
-    let _ = tokio::spawn(app.run_until_stopped());
+    tokio::spawn(app.run_until_stopped());
     let test_users = TestUsers::generate_users();
     let coas = Coas::default();
     let account_classes = AccountClasses::default(&coas);
@@ -249,20 +260,30 @@ pub async fn spawn_app() -> TestApp {
         .build()
         .unwrap();
 
-    let test_app = TestApp::new(
+    let run_state = RunState {
         address,
-        get_pgconnect_pool(&config.database),
-        connection,
-        config.database.db_name,
-        email_server,
+        api_client,
         port,
+    };
+
+    let db_state = DbState {
+        db_name: config.database.db_name,
+        pg_pool,
+        connection,
+    };
+
+    let mail_state = MailState {
+        email_client: config.email_client.client().unwrap(),
+        email_server,
+    };
+
+    TestApp::new(
+        run_state,
+        db_state,
+        mail_state,
+        config.ttl,
         test_users,
         account_classes,
         coas,
-        api_client,
-        config.expiration.idempotency_expiration_secs,
-        config.email_client.client().unwrap(),
-    );
-
-    test_app
+    )
 }

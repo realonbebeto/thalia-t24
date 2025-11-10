@@ -1,101 +1,113 @@
-use crate::account::models::{UserAccount, UserAccountStatus};
-use crate::account::repo::{db_create_user_account, db_start_account_balance};
-use crate::base::error::BaseError;
-use crate::ledger::models::{CreditLine, DebitLine, IntoJournalLine, JournalEntry, LineType};
-use crate::ledger::repo::{db_add_ledger_journal_entry, db_add_ledger_journal_line};
-use crate::staff::{models::CoaType, repo::db_get_coa_id_by_coa_type};
-use crate::telemetry::TraceError;
-use crate::transaction::service::generate_transaction_id;
-use error_stack::{Report, ResultExt};
-use iso_currency::Country;
-use isocountry::CountryCode;
-use sqlx::PgPool;
 use uuid::Uuid;
 
-// Generate account number
-fn generate_account_number() -> String {
-    let u = &Uuid::now_v7().as_u128().to_string()[..10];
+use crate::account::models::UserAccountEntity;
+use crate::account::schemas::UserAccountCreateRequest;
+use crate::base::error::{AppError, DomainError, SqlErrorExt};
+use crate::config::state::AppState;
+use crate::infra::pgdb::UnitofWork;
+use crate::ledger::models::{CreditLine, DebitLine, IntoJournalLine, JournalEntry, LineType};
+use crate::staff::models::CoaType;
+use crate::transaction::service::TransactionService;
 
-    u.to_string()
+#[derive(Debug)]
+pub struct AccountService<'a> {
+    app_state: &'a AppState,
 }
 
-// Generate IBAN
-fn generate_iban(country_code: &CountryCode) -> String {
-    let u = &Uuid::now_v7().as_u128().to_string()[..20];
+impl<'a> AccountService<'a> {
+    pub fn from(app_state: &'a AppState) -> Self {
+        Self { app_state }
+    }
 
-    format!("{}{}", country_code.alpha2(), u)
-}
+    // Create account
+    #[tracing::instrument("Create user account", skip(self))]
+    pub async fn create_user_account(
+        &self,
+        create_req: UserAccountCreateRequest,
+    ) -> Result<(), AppError> {
+        let mut uow = UnitofWork::from(&self.app_state.pgpool)
+            .await
+            .to_app_err("Failed to start postgres uow")?;
 
-// Create account
-#[tracing::instrument("Create user account", skip(pool))]
-pub async fn create_user_account(
-    pool: &PgPool,
-    user_id: Uuid,
-    branch_id: Uuid,
-    coa_id: Uuid,
-    account_class: Uuid,
-    country_code: CountryCode,
-) -> Result<(), Report<BaseError>> {
-    let mut tx = pool
-        .begin()
-        .await
-        .trace_with("Error establishing postgres transaction")
-        .change_context(BaseError::Internal)?;
+        let user_account_entity: UserAccountEntity = create_req.try_into()?;
 
-    let user_account = UserAccount {
-        id: Uuid::now_v7(),
-        user_id,
-        account_number: generate_account_number(),
-        iban: generate_iban(&country_code),
-        account_class,
-        coa_id,
-        branch_id,
-        currency: Country::US.to_string(),
-        status: UserAccountStatus::Pending,
-    };
+        uow.accounts()
+            .create(&user_account_entity)
+            .await
+            .to_app_err("Failed to create user account")?;
 
-    db_create_user_account(&mut tx, &user_account)
-        .await
-        .change_context(BaseError::Internal)?;
+        let tx_service = TransactionService::from(self.app_state);
 
-    let journal_entry = JournalEntry::new(
-        user_account.id,
-        generate_transaction_id(),
-        "THA-001".into(),
-        "THALIA account opening".into(),
-    );
+        let journal_entry = JournalEntry::new(
+            user_account_entity.id,
+            tx_service.generate_transaction_id(),
+            "THA-001".into(),
+            "THALIA account opening".into(),
+        );
 
-    let debit_coa_id = db_get_coa_id_by_coa_type(&mut tx, CoaType::Asset)
-        .await
-        .change_context(BaseError::Internal)?;
+        let debit_coa_id = uow
+            .staffs()
+            .fetch_coa_id_by_coa_type(CoaType::Asset)
+            .await
+            .to_app_err("Failed to fetch debit_coa_id")?;
 
-    let debit_line = DebitLine::new(debit_coa_id, LineType::Debit);
+        let credit_coa_id = uow
+            .staffs()
+            .fetch_coa_id_by_coa_type(CoaType::Liability)
+            .await
+            .to_app_err("Failed to fetch credit_coa_id")?;
 
-    let credit_coa_id = db_get_coa_id_by_coa_type(&mut tx, CoaType::Liability)
-        .await
-        .change_context(BaseError::Internal)?;
+        let (debit_coa_id, credit_coa_id) = match (debit_coa_id, credit_coa_id) {
+            (Some(dc), Some(cc)) => (dc, cc),
+            (None, _) => Err(DomainError::NotFound(
+                "Missing associated Debit chart account".into(),
+            ))?,
+            (_, None) => Err(DomainError::NotFound(
+                "Missing associated Credit chart account".into(),
+            ))?,
+        };
 
-    let credit_line = CreditLine::new(credit_coa_id, LineType::Credit);
+        let debit_line = DebitLine::new(debit_coa_id, LineType::Debit);
 
-    let journal_line = IntoJournalLine::new(*journal_entry.get_id(), 0.0, debit_line, credit_line);
+        let credit_line = CreditLine::new(credit_coa_id, LineType::Credit);
 
-    // Add O to the ledger
-    db_add_ledger_journal_entry(&mut tx, &journal_entry)
-        .await
-        .change_context(BaseError::Internal)?;
+        let journal_line =
+            IntoJournalLine::new(*journal_entry.get_id(), 0.0, debit_line, credit_line);
 
-    db_add_ledger_journal_line(&mut tx, journal_line)
-        .await
-        .change_context(BaseError::Internal)?;
+        // Add O to the ledger
+        uow.ledgers()
+            .create_ledger_journal_entry(&journal_entry)
+            .await
+            .to_app_err("Failed to create journal entry")?;
 
-    db_start_account_balance(&mut tx, *journal_entry.get_user_account_id())
-        .await
-        .change_context(BaseError::Internal)?;
+        uow.ledgers()
+            .create_ledger_journal_line(journal_line)
+            .await
+            .to_app_err("failed to create journal line")?;
 
-    tx.commit()
-        .await
-        .trace_with("Error while committing user account creation transaction")
-        .change_context(BaseError::Internal)?;
+        uow.accounts()
+            .start_acc_balance(*journal_entry.get_user_account_id())
+            .await
+            .to_app_err("Failed to start account balance")?;
 
-    Ok(())
+        uow.commit()
+            .await
+            .to_app_err("Failed to commit user account creation")?;
+
+        Ok(())
+    }
+
+    pub async fn read_acc_balance(&self, user_acc_id: Uuid) -> Result<usize, AppError> {
+        let mut uow = UnitofWork::from(&self.app_state.pgpool)
+            .await
+            .to_app_err("Failed to start postgres uow")?;
+
+        let result = uow
+            .accounts()
+            .fetch_balance_by_user_account_id(user_acc_id)
+            .await
+            .to_app_err("Failed to read user account balance")?;
+
+        Ok(result.map(|v| (v.amount_cents / 100) as usize).unwrap_or(0))
+    }
 }

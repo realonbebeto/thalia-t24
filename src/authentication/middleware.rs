@@ -1,7 +1,3 @@
-use crate::authentication::schemas::AccessLevel;
-use crate::authentication::{CustomerSession, SessionType, schemas::SecretKey};
-use crate::authentication::{StaffSession, validate_access_token};
-use crate::base::error::{BaseError, ErrorExt};
 use actix_web::HttpMessage;
 use actix_web::{
     FromRequest,
@@ -13,12 +9,16 @@ use actix_web::{
     web,
 };
 
-const LOGGED_OUT: &str = "You are not logged in. Please log in...";
+use crate::authentication::{CustomerSession, SessionType, StaffSession};
+use crate::base::error::AuthError;
+use crate::config::state::AppState;
+use crate::user::models::AccessRole;
+
 const DEFAULT_WWW: HeaderValue = HeaderValue::from_static("Basic realm=\"thalia\"");
 
-#[tracing::instrument(name = "Customer Authorization Check" skip(req, next, secret))]
+#[tracing::instrument(name = "Customer Authorization Check" skip(req, next, app_state))]
 pub async fn reject_unauthorized_customer(
-    secret: web::Data<SecretKey>,
+    app_state: web::Data<AppState>,
     mut req: ServiceRequest,
     next: Next<impl MessageBody>,
 ) -> Result<ServiceResponse<EitherBody<impl MessageBody>>, actix_web::Error> {
@@ -28,13 +28,13 @@ pub async fn reject_unauthorized_customer(
     };
 
     match (
-        session.get_sesh_user().to_internal()?,
-        validate_access_token(&req, &secret.get_ref().0),
+        session.get_sesh_user()?,
+        app_state.token_handler.verify_from_service_req(&req),
     ) {
         (Some(metadata), Ok(_)) | (Some(metadata), Err(_)) | (None, Ok(metadata)) => {
             // Handle case if not customer
-            match metadata.get_persissions() {
-                AccessLevel::Customer => {
+            match metadata.get_role() {
+                AccessRole::Customer => {
                     req.extensions_mut().insert(metadata);
                     let mut res = next.call(req).await?;
 
@@ -44,18 +44,18 @@ pub async fn reject_unauthorized_customer(
 
                     return Ok(res.map_body(|_, body| EitherBody::left(body)));
                 }
-                _ => Err(BaseError::Forbidden)?,
+                _ => Err(AuthError::InsufficientPermissions)?,
             }
         }
-        (None, Err(_)) => Err(BaseError::InvalidCredentials {
-            message: LOGGED_OUT.into(),
-        })?,
+        (None, Err(_)) => Err(AuthError::InvalidCredentials(
+            "No active session found or missing credentials".into(),
+        ))?,
     }
 }
 
-#[tracing::instrument(name = "Staff Authorization Check" skip(req, next, secret))]
+#[tracing::instrument(name = "Staff Authorization Check" skip(req, next, app_state))]
 pub async fn reject_unauthorized_staff(
-    secret: web::Data<SecretKey>,
+    app_state: web::Data<AppState>,
     mut req: ServiceRequest,
     next: Next<impl MessageBody>,
 ) -> Result<ServiceResponse<EitherBody<impl MessageBody>>, actix_web::Error> {
@@ -65,13 +65,13 @@ pub async fn reject_unauthorized_staff(
     };
 
     match (
-        session.get_sesh_user().to_internal()?,
-        validate_access_token(&req, &secret.get_ref().0),
+        session.get_sesh_user()?,
+        app_state.token_handler.verify_from_service_req(&req),
     ) {
         (Some(metadata), Ok(_)) | (Some(metadata), Err(_)) | (None, Ok(metadata)) => {
             // Handle case if not superuser/manager
-            match metadata.get_persissions() {
-                AccessLevel::Manager | AccessLevel::Superuser => {
+            match metadata.get_role() {
+                AccessRole::Manager | AccessRole::Superuser => {
                     req.extensions_mut().insert(metadata);
                     let mut res = next.call(req).await?;
 
@@ -81,11 +81,11 @@ pub async fn reject_unauthorized_staff(
 
                     return Ok(res.map_body(|_, body| EitherBody::left(body)));
                 }
-                _ => Err(BaseError::Forbidden)?,
+                _ => Err(AuthError::InsufficientPermissions)?,
             }
         }
-        (None, Err(_)) => Err(BaseError::InvalidCredentials {
-            message: LOGGED_OUT.into(),
-        })?,
+        (None, Err(_)) => Err(AuthError::InvalidCredentials(
+            "Missing active session or credentials".into(),
+        ))?,
     }
 }

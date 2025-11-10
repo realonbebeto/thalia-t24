@@ -1,135 +1,121 @@
-use crate::account::models::UserAccount;
-use crate::account::schemas::UserAccountBalance;
+use crate::account::models::{AccountBalanceEntity, UserAccountEntity};
 use crate::ledger::models::LineType;
-use crate::telemetry::TraceError;
 use sqlx::{PgPool, Postgres, Row, Transaction};
 use uuid::Uuid;
 
-#[tracing::instrument("Inserting accounts details on creation of user account", skip(tx))]
-pub async fn db_create_user_account(
-    tx: &mut Transaction<'_, Postgres>,
-    user_account: &UserAccount,
-) -> Result<(), sqlx::Error> {
-    sqlx::query("INSERT INTO user_account(id, user_id, account_number, iban, account_class, coa_id, branch_id, currency, status) 
-    VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9)")
-    .bind(user_account.id)
-    .bind(user_account.user_id)
-    .bind(&user_account.account_number)
-    .bind(&user_account.iban)
-    .bind(user_account.account_class)
-    .bind(user_account.coa_id)
-    .bind(user_account.branch_id)
-    .bind(&user_account.currency)
-    .bind(&user_account.status)
-    .execute(&mut **tx).await.trace_with("Error while inserting account details")?;
-
-    Ok(())
+#[derive(Debug)]
+pub struct AccountRepository<'a, 'b> {
+    pool: &'a PgPool,
+    tx: &'b mut Transaction<'a, Postgres>,
 }
 
-#[tracing::instrument("Fetching chart account id by id", skip(pool))]
-pub async fn db_get_coa_id_by_account_id(
-    pool: &PgPool,
-    account_id: Uuid,
-) -> Result<Uuid, sqlx::Error> {
-    let result = sqlx::query("SELECT coa_id FROM user_account WHERE id=$1")
-        .bind(account_id)
-        .fetch_optional(pool)
-        .await
-        .trace_with("Error while fetching user account coa id")?;
-
-    match result {
-        Some(r) => {
-            let r = r.get::<Uuid, _>("coa_id");
-            Ok(r)
-        }
-        None => Err(sqlx::Error::RowNotFound)
-            .trace_with(&format!("coa_id for account id: {} not found", account_id)),
+impl<'a, 'b> AccountRepository<'a, 'b> {
+    pub fn from(pool: &'a PgPool, tx: &'b mut Transaction<'a, Postgres>) -> Self {
+        Self { pool, tx }
     }
-}
 
-#[tracing::instrument("Fetching account balance by id", skip(pool))]
-pub async fn db_get_balance_by_user_account_id(
-    pool: &PgPool,
-    account_id: Uuid,
-) -> Result<UserAccountBalance, sqlx::Error> {
-    let result = sqlx::query("SELECT amount_cents FROM account_balance WHERE account_id=$1")
-        .bind(account_id)
-        .fetch_optional(pool)
-        .await
-        .trace_with("Error fetching account balance")?;
+    #[tracing::instrument(
+        "Inserting accounts details on creation of user account",
+        skip(self, user_account)
+    )]
+    pub async fn create(&mut self, user_account: &UserAccountEntity) -> Result<(), sqlx::Error> {
+        sqlx::query("INSERT INTO user_account(id, user_id, account_number, iban, account_class, coa_id, branch_id, currency, status) 
+            VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9)")
+            .bind(user_account.id)
+            .bind(user_account.user_id)
+            .bind(&user_account.account_number)
+            .bind(&user_account.iban)
+            .bind(user_account.account_class)
+            .bind(user_account.coa_id)
+            .bind(user_account.branch_id)
+            .bind(&user_account.currency)
+            .bind(&user_account.status)
+            .execute(&mut **self.tx).await?;
 
-    match result {
-        Some(balance) => {
-            let balance = balance.get::<i64, _>("amount_cents") as u64;
-            let acc_balance =
-                UserAccountBalance::new(account_id, balance, "USD".into(), chrono::Utc::now());
-            Ok(acc_balance)
-        }
-        None => Err(sqlx::Error::RowNotFound).trace_with(&format!(
-            "Account balance not found for account id: {}",
-            account_id
-        )),
+        Ok(())
     }
-}
 
-#[tracing::instrument("Initialize account balance cache", skip(tx))]
-pub async fn db_start_account_balance(
-    tx: &mut Transaction<'_, Postgres>,
-    account_id: Uuid,
-) -> Result<(), sqlx::Error> {
-    sqlx::query("INSERT INTO account_balance(account_id, amount_cents) VALUES($1, $2)")
+    #[tracing::instrument("Fetching chart account id by id", skip(self, account_id))]
+    pub async fn fetch_coa_id_by_account_id(
+        &self,
+        account_id: Uuid,
+    ) -> Result<Option<Uuid>, sqlx::Error> {
+        let result: Option<Uuid> = sqlx::query("SELECT coa_id FROM user_account WHERE id=$1")
+            .bind(account_id)
+            .fetch_optional(self.pool)
+            .await?
+            .map(|r| r.get("coa_id"));
+
+        Ok(result)
+    }
+
+    #[tracing::instrument("Fetching account balance by id", skip(self, account_id))]
+    pub async fn fetch_balance_by_user_account_id(
+        &self,
+        account_id: Uuid,
+    ) -> Result<Option<AccountBalanceEntity>, sqlx::Error> {
+        let result = sqlx::query_as::<_, AccountBalanceEntity>(
+            "SELECT account_id, amount_cents FROM account_balance WHERE account_id=$1",
+        )
         .bind(account_id)
-        .bind(0)
-        .execute(&mut **tx)
-        .await
-        .trace_with("Error while sarting account balance cache record")?;
+        .fetch_optional(self.pool)
+        .await?;
 
-    Ok(())
-}
+        Ok(result)
+    }
 
-#[tracing::instrument("Update account balance cache", skip(tx))]
-pub async fn db_update_account_balance(
-    tx: &mut Transaction<'_, Postgres>,
-    account_id: Uuid,
-    amount: i64,
-) -> Result<(), sqlx::Error> {
-    sqlx::query(
-        "UPDATE account_balance
-    SET amount_cents WHERE account_id=$1",
-    )
-    .bind(amount)
-    .bind(account_id)
-    .execute(&mut **tx)
-    .await
-    .trace_with("Error while updating account balance")?;
+    #[tracing::instrument("Initialize account balance cache", skip(self, account_id))]
+    pub async fn start_acc_balance(&mut self, account_id: Uuid) -> Result<(), sqlx::Error> {
+        sqlx::query("INSERT INTO account_balance(account_id, amount_cents) VALUES($1, $2)")
+            .bind(account_id)
+            .bind(0)
+            .execute(&mut **self.tx)
+            .await?;
 
-    Ok(())
-}
+        Ok(())
+    }
 
-#[tracing::instrument("Calculate account balance", skip(tx))]
-pub async fn db_calculate_account_balance(
-    tx: &mut Transaction<'_, Postgres>,
-    account_id: Uuid,
-    coa_id: Uuid,
-) -> Result<i64, sqlx::Error> {
-    let result = sqlx::query(
-        "SELECT SUM(COALESCE(CASE jl.line_type 
+    #[tracing::instrument("Update account balance cache", skip(self, account_id, amount))]
+    pub async fn update_acc_balance(
+        &mut self,
+        account_id: Uuid,
+        amount: i64,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            "UPDATE account_balance
+                    SET amount_cents WHERE account_id=$1",
+        )
+        .bind(amount)
+        .bind(account_id)
+        .execute(&mut **self.tx)
+        .await?;
+
+        Ok(())
+    }
+
+    #[tracing::instrument("Calculate account balance", skip(self))]
+    pub async fn calculate_acc_balance(
+        &mut self,
+        account_id: Uuid,
+        coa_id: Uuid,
+    ) -> Result<i64, sqlx::Error> {
+        let result = sqlx::query(
+            "SELECT SUM(COALESCE(CASE jl.line_type 
                         WHEN $1 THEN jl.amount_cents
                         WHEN $2  THEN -jl.amount_cents
                         END, 0)) AS balance_cents
                     FROM journal_entry je JOIN journal_line jl ON je.id = jl.journal_entry_id 
                     WHERE je.user_account_id=$3
                     AND jl.coa_id = $3;",
-    )
-    .bind(LineType::Credit)
-    .bind(LineType::Debit)
-    .bind(account_id)
-    .bind(coa_id)
-    .fetch_one(&mut **tx)
-    .await
-    .trace_with("Error while calculating user account balance")?;
+        )
+        .bind(LineType::Credit)
+        .bind(LineType::Debit)
+        .bind(account_id)
+        .bind(coa_id)
+        .fetch_one(&mut **self.tx)
+        .await?
+        .get("balance_cents");
 
-    let result: i64 = result.get("balance_cents");
-
-    Ok(result)
+        Ok(result)
+    }
 }

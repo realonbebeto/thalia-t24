@@ -1,4 +1,6 @@
-use error_stack::Report;
+use std::str::FromStr;
+
+use crate::base::error::ValidationError;
 use uuid::Uuid;
 
 #[derive(Debug, serde::Deserialize, serde::Serialize, sqlx::Type)]
@@ -11,7 +13,7 @@ pub enum UserAccountStatus {
 }
 
 #[derive(Debug, serde::Deserialize, serde::Serialize, sqlx::Type)]
-pub struct UserAccount {
+pub struct UserAccountEntity {
     pub id: Uuid,
     pub user_id: Uuid,
     pub account_number: String,
@@ -33,22 +35,19 @@ pub enum AccountKind {
     Specialty,
 }
 
-#[derive(Debug, thiserror::Error)]
-pub enum AccountKindError {
-    #[error("Invalid account type: {message}")]
-    Invalid { message: String },
-}
+impl FromStr for AccountKind {
+    type Err = ValidationError;
 
-impl TryFrom<String> for AccountKind {
-    type Error = Report<AccountKindError>;
-
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        match value.to_lowercase().trim() {
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().trim() {
             "deposit" => Ok(AccountKind::Deposit),
             "investment" => Ok(AccountKind::Investment),
             "loan" => Ok(AccountKind::Loan),
             "specialty" => Ok(AccountKind::Specialty),
-            _ => Err(Report::new(AccountKindError::Invalid { message: value })),
+            _ => Err(ValidationError::InvalidValue {
+                field: "kind".into(),
+                reason: "Unkown account type".into(),
+            }),
         }
     }
 }
@@ -71,7 +70,7 @@ impl BehaviorPolicy {
 
 #[derive(Debug, sqlx::FromRow, getset::Getters)]
 #[get = "pub with_prefix"]
-pub struct AccountClass {
+pub struct AccountClassEntity {
     id: Uuid,
     kind: AccountKind,
     code: String,
@@ -82,7 +81,7 @@ pub struct AccountClass {
     default_min_balance: u32,
 }
 
-impl AccountClass {
+impl AccountClassEntity {
     pub fn new(
         id: Uuid,
         kind: AccountKind,
@@ -103,4 +102,10 @@ impl AccountClass {
             default_min_balance: behave_policy.get_default_min_balance(),
         }
     }
+}
+
+#[derive(Debug, sqlx::FromRow)]
+pub struct AccountBalanceEntity {
+    pub account_id: Uuid,
+    pub amount_cents: i64,
 }

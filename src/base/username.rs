@@ -1,28 +1,36 @@
 use crate::base::error::ValidationError;
-use error_stack::Report;
+use derive_more::Display;
 use serde::{Deserialize, Serialize};
 use unicode_segmentation::UnicodeSegmentation;
 use utoipa::ToSchema;
 
-#[derive(Deserialize, Serialize, Debug, ToSchema)]
+#[derive(Deserialize, Serialize, Debug, ToSchema, Display)]
 pub struct Username(String);
 
 impl Username {
-    pub fn parse(s: String) -> Result<Username, Report<ValidationError>> {
-        let is_empty_or_whitespace = s.trim().is_empty();
+    pub fn parse(s: String) -> Result<Username, anyhow::Error> {
+        if s.trim().is_empty() {
+            Err(anyhow::anyhow!(ValidationError::MissingField(
+                "Username is null/empty".into(),
+            )))?
+        }
 
-        let is_too_long = s.graphemes(true).count() > 256;
+        if s.graphemes(true).count() > 256 {
+            Err(anyhow::anyhow!(ValidationError::TooLong {
+                field: "password".into(),
+                max: 256,
+            }))?
+        }
 
         let forbidden_chars = ['/', '\\', '(', ')', '"', '<', '>', '{', '}'];
-
-        let contains_forbidden_chars = s.chars().any(|g| forbidden_chars.contains(&g));
-
-        if is_empty_or_whitespace || is_too_long || contains_forbidden_chars {
-            Err(Report::new(ValidationError::InvalidUsername)
-                .attach(format!("Failed to parse {}", s)))
-        } else {
-            Ok(Self(s))
+        if s.chars().any(|g| forbidden_chars.contains(&g)) {
+            Err(anyhow::anyhow!(ValidationError::InvalidValue {
+                field: "password".into(),
+                reason: format!("Username should not include: {:?}", forbidden_chars),
+            }))?
         }
+
+        Ok(Self(s))
     }
 }
 

@@ -1,6 +1,9 @@
-use error_stack::Report;
+use std::str::FromStr;
+
 use strum::Display;
 use uuid::Uuid;
+
+use crate::base::error::ValidationError;
 
 #[derive(Debug, sqlx::Type, Display)]
 #[sqlx(type_name = "chart_account_type", rename_all = "lowercase")]
@@ -13,41 +16,21 @@ pub enum CoaType {
     Memoranda,
 }
 
-#[derive(Debug, thiserror::Error)]
-pub enum CoaTypeError {
-    #[error("Invalid chart account type: {message}")]
-    Invalid { message: String },
-}
+impl FromStr for CoaType {
+    type Err = ValidationError;
 
-impl TryFrom<String> for CoaType {
-    type Error = Report<CoaTypeError>;
-
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        match value.to_lowercase().trim() {
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().trim() {
             "asset" => Ok(CoaType::Asset),
             "equity" => Ok(CoaType::Equity),
             "expense" => Ok(CoaType::Expense),
             "income" => Ok(CoaType::Income),
             "liability" => Ok(CoaType::Liability),
             "memoranda" => Ok(CoaType::Memoranda),
-            _ => Err(Report::new(CoaTypeError::Invalid { message: value })),
-        }
-    }
-}
-
-impl TryFrom<&str> for CoaType {
-    type Error = Report<CoaTypeError>;
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
-        match value.to_lowercase().trim() {
-            "asset" => Ok(CoaType::Asset),
-            "equity" => Ok(CoaType::Equity),
-            "expense" => Ok(CoaType::Expense),
-            "income" => Ok(CoaType::Income),
-            "liability" => Ok(CoaType::Liability),
-            "memoranda" => Ok(CoaType::Memoranda),
-            _ => Err(Report::new(CoaTypeError::Invalid {
-                message: value.into(),
-            })),
+            _ => Err(ValidationError::InvalidValue {
+                field: "coa_type".into(),
+                reason: "Unknown coa_type".into(),
+            }),
         }
     }
 }

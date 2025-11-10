@@ -1,16 +1,18 @@
 use crate::base::error::ValidationError;
-use error_stack::Report;
 use validator::ValidateEmail;
 
-#[derive(serde::Deserialize, serde::Serialize, Debug, Clone)]
+#[derive(serde::Deserialize, serde::Serialize, Debug, Clone, Hash, PartialEq, Eq)]
 pub struct Email(String);
 
 impl Email {
-    pub fn parse(s: String) -> Result<Email, Report<ValidationError>> {
+    pub fn parse(s: String) -> Result<Email, anyhow::Error> {
         if s.validate_email() {
             Ok(Self(s))
         } else {
-            Err(Report::new(ValidationError::InvalidEmail).attach(format!("Failed to parse {}", s)))
+            Err(anyhow::anyhow!(ValidationError::InvalidValue {
+                field: "email".into(),
+                reason: "Invalid email".into(),
+            }))
         }
         // TODO: add validation
     }

@@ -1,9 +1,8 @@
 use crate::base::Email;
 use crate::notification::schemas::{Recipient, SendEmailRequest};
 use crate::notification::schemas::{WelcomeEmailTemplate, WelcomeEmailTemplateTxt};
-use crate::telemetry::TraceError;
+use anyhow::Context;
 use askama::Template;
-use error_stack::{Report, ResultExt};
 use reqwest::{Client, Url};
 
 #[derive(Clone, Debug)]
@@ -15,18 +14,6 @@ pub struct EmailClient {
     public_email_key: String,
 }
 
-#[derive(Debug, thiserror::Error)]
-pub enum EmailClientError {
-    #[error("Failed to parse uri")]
-    BadUri,
-    #[error("Failed to build client")]
-    BuildError,
-    #[error("Error while trying to send welcome email")]
-    WelcomeError,
-    #[error("reqwest Error while sending email")]
-    PostError,
-}
-
 impl EmailClient {
     pub fn new(
         email_base_uri: &str,
@@ -34,19 +21,13 @@ impl EmailClient {
         private_email_key: &str,
         public_email_key: &str,
         timeout: std::time::Duration,
-    ) -> Result<Self, Report<EmailClientError>> {
-        let email_base_uri = Url::parse(email_base_uri)
-            .trace_with(&format!(
-                "Failed to parse email base uri: {}",
-                email_base_uri
-            ))
-            .change_context(EmailClientError::BadUri)?;
+    ) -> Result<Self, anyhow::Error> {
+        let email_base_uri = Url::parse(email_base_uri).context("Failed parse email base uri")?;
 
         let http_client = Client::builder()
             .timeout(timeout)
             .build()
-            .trace_with("Failed to build http client")
-            .change_context(EmailClientError::BuildError)?;
+            .context("Failed to build http client")?;
 
         Ok(Self {
             http_client,
@@ -59,18 +40,18 @@ impl EmailClient {
 
     async fn send_email(
         &self,
-        recipient: Email,
+        recipient: &str,
         subject: &str,
         html_part: &str,
         text_part: &str,
-    ) -> Result<(), Report<EmailClientError>> {
+    ) -> Result<(), anyhow::Error> {
         let request_body = SendEmailRequest::new(
             self.sender.as_ref(),
             "Thalia Corp",
             subject,
             text_part,
             html_part,
-            vec![Recipient::new(recipient.as_ref())],
+            vec![Recipient::new(recipient)],
         );
 
         self.http_client
@@ -82,11 +63,9 @@ impl EmailClient {
             .json(&request_body)
             .send()
             .await
-            .trace_with("reqwest error")
-            .change_context(EmailClientError::PostError)?
+            .context("Failed to send email")?
             .error_for_status()
-            .trace_with("reqwest error")
-            .change_context(EmailClientError::PostError)?;
+            .context("Failed to send email")?;
 
         Ok(())
     }
@@ -94,23 +73,21 @@ impl EmailClient {
     pub async fn send_welcome_email(
         &self,
         app_address: &str,
-        recipient: Email,
+        recipient: &str,
         subject: &str,
         first_name: &str,
         activate_token: &str,
         company_name: &str,
-    ) -> Result<(), Report<EmailClientError>> {
+    ) -> Result<(), anyhow::Error> {
         let confirmation_link = format!("{}/confirm/{}", app_address, activate_token);
         let welcome_email = WelcomeEmailTemplate::new(first_name, &confirmation_link, company_name)
             .render()
-            .trace_with("Failed to render html template")
-            .change_context(EmailClientError::WelcomeError)?;
+            .context("Failed to render welcome email template (html)")?;
 
         let welcome_email_txt =
             WelcomeEmailTemplateTxt::new(first_name, &confirmation_link, company_name)
                 .render()
-                .trace_with("Failed to rendeer txt template")
-                .change_context(EmailClientError::WelcomeError)?;
+                .context("Failed to render welcome email template (txt)")?;
 
         self.send_email(recipient, subject, &welcome_email, &welcome_email_txt)
             .await?;
@@ -200,7 +177,7 @@ mod tests {
             .await;
 
         let _ = email_client
-            .send_email(email(), &subject(), &content(), &content())
+            .send_email(email().as_ref(), &subject(), &content(), &content())
             .await;
     }
 
@@ -217,7 +194,7 @@ mod tests {
             .await;
 
         let outcome = email_client
-            .send_email(email(), &subject(), &content(), &content())
+            .send_email(email().as_ref(), &subject(), &content(), &content())
             .await;
 
         assert_ok!(outcome);
@@ -236,7 +213,7 @@ mod tests {
             .await;
 
         let outcome = email_client
-            .send_email(email(), &subject(), &content(), &content())
+            .send_email(email().as_ref(), &subject(), &content(), &content())
             .await;
 
         let _ = assert_err!(outcome);
@@ -258,7 +235,7 @@ mod tests {
             .await;
 
         let outcome = email_client
-            .send_email(email(), &subject(), &content(), &content())
+            .send_email(email().as_ref(), &subject(), &content(), &content())
             .await;
 
         let _ = assert_err!(outcome);

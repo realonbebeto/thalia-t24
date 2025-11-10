@@ -1,26 +1,31 @@
-use crate::base::error::ValidationError;
-use crate::base::{Email, Name, Password, Username};
-use crate::user::schemas::UserCreateRequest;
-use error_stack::Report;
+use derive_more::Display;
 use sqlx::types::chrono;
+use std::str::FromStr;
 use uuid::Uuid;
 
-#[derive(Debug, serde::Deserialize, serde::Serialize, sqlx::Type, PartialEq)]
+use crate::base::error::ValidationError;
+
+#[derive(
+    Debug, serde::Deserialize, serde::Serialize, sqlx::Type, PartialEq, Eq, Clone, Hash, Display,
+)]
 #[sqlx(type_name = "user_role", rename_all = "lowercase")]
 pub enum AccessRole {
     Superuser,
     Manager,
     Customer,
 }
+impl FromStr for AccessRole {
+    type Err = ValidationError;
 
-impl TryFrom<String> for AccessRole {
-    type Error = Report<ValidationError>;
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        match value.to_lowercase().trim() {
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().trim() {
             "superuser" => Ok(AccessRole::Superuser),
             "manager" => Ok(AccessRole::Manager),
             "customer" => Ok(AccessRole::Customer),
-            _ => Err(Report::new(ValidationError::WrongAccessRole)),
+            _ => Err(ValidationError::InvalidValue {
+                field: "access_role".into(),
+                reason: "Unknown access_role".into(),
+            }),
         }
     }
 }
@@ -29,13 +34,13 @@ impl TryFrom<String> for AccessRole {
     Debug, serde::Deserialize, serde::Serialize, sqlx::FromRow, getset::Getters, getset::Setters,
 )]
 #[get = "pub with_prefix"]
-pub struct User {
+pub struct UserEntity {
     pub id: Uuid,
-    pub first_name: Name,
-    pub last_name: Name,
-    pub username: Username,
-    pub password: Password,
-    pub email: Email,
+    pub first_name: String,
+    pub last_name: String,
+    pub username: String,
+    pub password: String,
+    pub email: String,
     pub date_of_birth: chrono::NaiveDate,
     pub is_confirmed: bool,
     pub is_active: bool,
@@ -43,77 +48,36 @@ pub struct User {
     pub access_role: AccessRole,
 }
 
-pub struct StaffUser(pub User);
-
-pub struct CustomerUser(pub User);
-
-impl TryFrom<UserCreateRequest> for StaffUser {
-    type Error = Report<ValidationError>;
-
-    fn try_from(value: UserCreateRequest) -> Result<Self, Self::Error> {
-        let first_name = Name::parse(value.first_name)?;
-        let last_name = Name::parse(value.last_name)?;
-        let email = Email::parse(value.email)?;
-        let username = Username::parse(value.username)?;
-        let password = Password::parse(value.password)?;
-        let is_confirmed = false;
-        let is_active = false;
-        let is_verified = false;
-        let date_of_birth = value.date_of_birth;
-        let access_role: AccessRole = value.access_role.try_into()?;
-
-        if access_role == AccessRole::Customer {
-            return Err(Report::new(ValidationError::WrongAccessRole));
-        }
-
-        Ok(StaffUser(User {
-            id: Uuid::now_v7(),
-            first_name,
-            last_name,
-            username,
-            password,
-            email,
-            date_of_birth,
-            is_confirmed,
-            is_active,
-            is_verified,
-            access_role,
-        }))
-    }
+#[derive(Debug, serde::Serialize, sqlx::FromRow, getset::Getters)]
+#[get = "pub with_prefix"]
+pub struct UpdateUserEntity {
+    pub id: Uuid,
+    pub first_name: Option<String>,
+    pub last_name: Option<String>,
+    pub username: Option<String>,
+    pub password: Option<String>,
+    pub email: Option<String>,
+    pub date_of_birth: Option<chrono::NaiveDate>,
+    pub is_confirmed: Option<bool>,
+    pub is_active: Option<bool>,
+    pub is_verified: Option<bool>,
+    pub access_role: Option<AccessRole>,
 }
 
-impl TryFrom<UserCreateRequest> for CustomerUser {
-    type Error = Report<ValidationError>;
-
-    fn try_from(value: UserCreateRequest) -> Result<Self, Self::Error> {
-        let first_name = Name::parse(value.first_name)?;
-        let last_name = Name::parse(value.last_name)?;
-        let email = Email::parse(value.email)?;
-        let username = Username::parse(value.username)?;
-        let password = Password::parse(value.password)?;
-        let is_confirmed = false;
-        let is_active = false;
-        let is_verified = false;
-        let date_of_birth = value.date_of_birth;
-
-        let access_role: AccessRole = value.access_role.try_into()?;
-
-        if access_role != AccessRole::Customer {
-            return Err(Report::new(ValidationError::WrongAccessRole));
+impl UpdateUserEntity {
+    pub fn activate_email_update(user_id: Uuid) -> Self {
+        Self {
+            id: user_id,
+            first_name: None,
+            last_name: None,
+            username: None,
+            password: None,
+            email: None,
+            date_of_birth: None,
+            is_confirmed: Some(true),
+            is_active: None,
+            is_verified: None,
+            access_role: None,
         }
-
-        Ok(CustomerUser(User {
-            id: Uuid::now_v7(),
-            first_name,
-            last_name,
-            username,
-            password,
-            email,
-            date_of_birth,
-            is_confirmed,
-            is_active,
-            is_verified,
-            access_role,
-        }))
     }
 }

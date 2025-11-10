@@ -82,7 +82,7 @@ fn invalid_username() -> impl Strategy<Value = String> {
 }
 
 // DOB
-fn invalid_dob() -> impl Strategy<Value = NaiveDate> {
+fn underage_dob() -> impl Strategy<Value = NaiveDate> {
     let today = Utc::now().naive_utc().date();
     let eighteen_yrs_ago = (today - today.with_year(today.year() - 18).unwrap()).num_days();
 
@@ -91,12 +91,33 @@ fn invalid_dob() -> impl Strategy<Value = NaiveDate> {
     (min_days_ago..eighteen_yrs_ago).prop_map(move |days| today - chrono::Duration::days(days))
 }
 
+fn valid_dob() -> impl Strategy<Value = NaiveDate> {
+    let today = Utc::now().naive_utc().date();
+    let eighteen_yrs_ago = (today - today.with_year(today.year() - 18).unwrap()).num_days();
+
+    (eighteen_yrs_ago..120 * 365).prop_map(move |days| today - chrono::Duration::days(days))
+}
+
+pub fn create_underage_user(role: &str) -> impl Strategy<Value = serde_json::Value> {
+    prop_oneof![
+        (
+            invalid_name(),
+            invalid_name(),
+            underage_dob(),
+            invalid_username(),
+            invalid_password(),
+            invalid_email()
+        )
+            .prop_map(move |(f, l, d, u, p, e)| serde_json::json!({"first_name": f, "last_name": l, "date_of_birth": d, "username": u, "password": p, "email": e, "access_role": role}))
+    ]
+}
+
 pub fn create_invalid_user(role: &str) -> impl Strategy<Value = serde_json::Value> {
     prop_oneof![
         (
             invalid_name(),
             invalid_name(),
-            invalid_dob(),
+            valid_dob(),
             invalid_username(),
             invalid_password(),
             invalid_email()

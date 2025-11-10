@@ -1,37 +1,37 @@
-use super::repo::{db_get_journal_entry, db_get_journal_entry_by_id};
-use super::schemas::JournalRequest;
-use crate::{
-    base::error::ErrorExt,
-    ledger::schemas::{JournalIdRequest, JournalResponse},
-};
 use actix_web::{HttpResponse, web};
-use sqlx::PgPool;
 
-#[tracing::instrument("Fetching journal entries", skip(pool))]
+use crate::{
+    config::state::AppState,
+    ledger::{
+        schemas::{JournalIdRequest, JournalRequest, JournalResponse},
+        service::LedgerService,
+    },
+};
+
+#[tracing::instrument("Fetching journal entries", skip(app_state))]
 #[utoipa::path(get, path="/journal", responses((status=200, body=JournalResponse, description="Journal entries found"), (status=404, description="Journal entries not found")))]
-pub async fn get_journal_entry(
-    pool: web::Data<PgPool>,
+pub async fn journal_entry(
+    app_state: web::Data<AppState>,
     request: web::Query<JournalRequest>,
 ) -> actix_web::Result<HttpResponse> {
-    let entries = db_get_journal_entry(&pool, &request.into_inner())
-        .await
-        .to_internal()?;
+    let ledger_service = LedgerService::from(&app_state);
 
-    let response: JournalResponse = entries.into();
+    let response = ledger_service.journal_entry(request.into_inner()).await?;
+
     Ok(HttpResponse::Ok().json(response))
 }
 
-#[tracing::instrument("Fetching journal entries", skip(pool))]
+#[tracing::instrument("Fetching journal entries", skip(app_state))]
 #[utoipa::path(get, path="/journal/{journal_id}", responses((status=200, body=JournalResponse, description="Journal entry found"), (status=404, description="Journal entry not found")))]
-pub async fn get_journal_entry_by_id(
-    pool: web::Data<PgPool>,
+pub async fn journal_entry_by_id(
+    app_state: web::Data<AppState>,
     request: web::Path<JournalIdRequest>,
 ) -> actix_web::Result<HttpResponse> {
-    let entry = db_get_journal_entry_by_id(&pool, &request.into_inner())
-        .await
-        .to_internal()?;
+    let ledger_service = LedgerService::from(&app_state);
+    let response = ledger_service
+        .journal_entry_by_id(request.into_inner())
+        .await?;
 
-    let response: JournalResponse = entry.into();
     Ok(HttpResponse::Ok().json(response))
 }
 

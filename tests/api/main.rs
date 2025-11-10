@@ -1,6 +1,6 @@
-mod account_check;
+mod account_tests;
 mod base;
-mod coa_check;
-mod health_check;
-mod login_check;
-mod signup_check;
+mod coa_tests;
+mod health_tests;
+mod login_tests;
+mod signup_tests;

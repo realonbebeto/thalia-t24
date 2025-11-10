@@ -1,16 +1,17 @@
 use sqlx::PgPool;
+use std::str::FromStr;
 use std::{collections::HashMap, fs::File};
 
-use thalia::account::models::{AccountClass, AccountKind, BehaviorPolicy};
-use thalia::staff::models::ChartAccount;
+use thalia::account::models::{AccountClassEntity, AccountKind, BehaviorPolicy};
+use thalia::staff::models::{ChartAccount, CoaType};
 use uuid::Uuid;
 
 #[derive(Debug, getset::Setters, getset::Getters)]
 #[get = "pub with_prefix"]
 pub struct AccountClasses {
-    checking: AccountClass,
-    saving: AccountClass,
-    loan: AccountClass,
+    checking: AccountClassEntity,
+    saving: AccountClassEntity,
+    loan: AccountClassEntity,
 }
 
 #[derive(Debug, getset::Setters, getset::Getters)]
@@ -32,7 +33,7 @@ impl Coas {
                 Uuid::now_v7(),
                 record.get(0).unwrap(),
                 record.get(1).unwrap(),
-                record.get(2).unwrap().try_into().unwrap(),
+                CoaType::from_str(record.get(2).unwrap()).unwrap(),
                 record.get(3).unwrap(),
             );
 
@@ -64,7 +65,7 @@ impl Coas {
 impl AccountClasses {
     pub fn default(coas: &Coas) -> Self {
         let behave_policy = BehaviorPolicy::new(575, 100);
-        let checking = AccountClass::new(
+        let checking = AccountClassEntity::new(
             Uuid::now_v7(),
             AccountKind::Deposit,
             "1000",
@@ -74,7 +75,7 @@ impl AccountClasses {
             &behave_policy,
         );
 
-        let saving = AccountClass::new(
+        let saving = AccountClassEntity::new(
             Uuid::now_v7(),
             AccountKind::Deposit,
             "1001",
@@ -84,7 +85,7 @@ impl AccountClasses {
             &behave_policy,
         );
 
-        let loan = AccountClass::new(
+        let loan = AccountClassEntity::new(
             Uuid::now_v7(),
             AccountKind::Loan,
             "1002",
@@ -101,7 +102,7 @@ impl AccountClasses {
         }
     }
 
-    async fn store_account_class(&self, pool: &PgPool, class: &AccountClass) {
+    async fn store_account_class(&self, pool: &PgPool, class: &AccountClassEntity) {
         sqlx::query("INSERT INTO account_class(id, kind, code, name, description, coa_id, default_interest_rate, default_min_balance) VALUES($1, $2, $3, $4, $5, $6, $7, $8)")
             .bind(class.get_id())
             .bind(class.get_kind())

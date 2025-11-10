@@ -9,5 +9,4 @@ mod email;
 pub use email::Email;
 pub mod ids;
 mod password;
-pub mod schemas;
 pub use password::Password;

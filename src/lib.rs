@@ -8,6 +8,7 @@ pub mod credit_risk;
 pub mod customer;
 pub mod identity_verify;
 pub mod index;
+pub mod infra;
 pub mod ledger;
 pub mod loan;
 pub mod notification;

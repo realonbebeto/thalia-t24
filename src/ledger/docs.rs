@@ -2,7 +2,7 @@ use utoipa::OpenApi;
 
 #[derive(OpenApi)]
 #[openapi(paths(
-    crate::ledger::routes::get_journal_entry_by_id,
-    crate::ledger::routes::get_journal_entry
+    crate::ledger::routes::journal_entry_by_id,
+    crate::ledger::routes::journal_entry
 ))]
 pub struct LedgerApi;

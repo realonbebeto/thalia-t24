@@ -8,7 +8,7 @@ use getset::{Getters, Setters};
 use sqlx::PgPool;
 use thalia::base::{Email, Name, Password, Username};
 use thalia::user::models::AccessRole;
-use thalia::user::models::User;
+use thalia::user::schemas::User;
 use uuid::Uuid;
 
 #[derive(Debug, Setters, Getters)]
@@ -22,12 +22,11 @@ impl TestUsers {
     pub fn generate_users() -> Self {
         let staff = User {
             id: Uuid::now_v7(),
-            first_name: Name::parse(FirstName().fake()).unwrap(),
-            last_name: Name::parse(LastName().fake()).unwrap(),
+            first_name: Name::parse(FirstName().fake(), "name").unwrap(),
+            last_name: Name::parse(LastName().fake(), "name").unwrap(),
             username: Username::parse(en::Username().fake()).unwrap(),
-            password: Password::parse(en::Password(std::ops::Range { start: 8, end: 16 }).fake())
-                .unwrap(),
-            date_of_birth: NaiveDate::from_ymd_opt(1994, 07, 11).unwrap(),
+            password: Password::parse("Passwort56>78122884#".into()).unwrap(),
+            date_of_birth: NaiveDate::from_ymd_opt(1994, 7, 11).unwrap(),
             email: Email::parse(en::SafeEmail().fake()).unwrap(),
             is_confirmed: false,
             is_active: false,
@@ -37,12 +36,11 @@ impl TestUsers {
 
         let customer = User {
             id: Uuid::now_v7(),
-            first_name: Name::parse(FirstName().fake()).unwrap(),
-            last_name: Name::parse(FirstName().fake()).unwrap(),
+            first_name: Name::parse(FirstName().fake(), "name").unwrap(),
+            last_name: Name::parse(FirstName().fake(), "name").unwrap(),
             username: Username::parse(en::Username().fake()).unwrap(),
-            password: Password::parse(en::Password(std::ops::Range { start: 8, end: 16 }).fake())
-                .unwrap(),
-            date_of_birth: NaiveDate::from_ymd_opt(1994, 07, 11).unwrap(),
+            password: Password::parse("Passwort56>78122884#".into()).unwrap(),
+            date_of_birth: NaiveDate::from_ymd_opt(1994, 7, 11).unwrap(),
             email: Email::parse(en::SafeEmail().fake()).unwrap(),
             is_confirmed: false,
             is_active: false,
@@ -62,7 +60,7 @@ impl TestUsers {
         .bind(self.get_staff().get_first_name().as_ref())
         .bind(self.get_staff().get_last_name().as_ref())
         .bind(self.get_staff().get_username().as_ref())
-        .bind(self.get_staff().get_password().phash_as_ref())
+        .bind(self.get_staff().get_password().encode_password().unwrap())
         .bind(self.get_staff().get_date_of_birth())
         .bind(self.get_staff().get_email().as_ref())
         .bind(self.get_staff().get_is_confirmed())
@@ -74,7 +72,7 @@ impl TestUsers {
         .bind(self.get_customer().get_first_name().as_ref())
         .bind(self.get_customer().get_last_name().as_ref())
         .bind(self.get_customer().get_username().as_ref())
-        .bind(self.get_customer().get_password().phash_as_ref())
+        .bind(self.get_customer().get_password().encode_password().unwrap())
         .bind(self.get_customer().get_date_of_birth())
         .bind(self.get_customer().get_email().as_ref())
         .bind(self.get_customer().get_is_confirmed())

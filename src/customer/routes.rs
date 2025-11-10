@@ -1,65 +1,24 @@
-use crate::account::repo::db_get_balance_by_user_account_id;
-use crate::account::schemas::UserAccountBalance;
-use crate::authentication::schemas::SessionMetadata;
-use crate::authentication::{
-    create_activate_token, create_token,
-    repo::db_store_token,
-    schemas::{AccessLevel, Credentials, DefaultPassword, LoginRequest, SecretKey},
-    session_state::{CustomerSession, SessionType},
-    validate_activate_token, validate_credentials,
-};
-use crate::base::StdResponse;
-use crate::base::error::{BaseError, ErrorExt};
-use crate::config::Expiration;
-use crate::user::models::CustomerUser;
-use crate::user::repo::{db_confirm_user, db_create_user};
-use crate::user::schemas::UserCreateRequest;
 use actix_web::{HttpResponse, cookie::Cookie, http::header, web};
-use actix_web_flash_messages::FlashMessage;
-use chrono::offset::Utc;
-use sqlx::PgPool;
 use uuid::Uuid;
 
+use crate::account::{schemas::UserAccountBalance, service::AccountService};
+use crate::authentication::{
+    schemas::LoginRequest, service::AuthService, session_state::CustomerSession,
+};
+use crate::base::StdResponse;
+use crate::config::state::AppState;
+use crate::user::{schemas::UserRegisterRequest, service::UserService};
+
 // Create account
-#[tracing::instrument("Customer signup", skip(pool, request, secret_key, expiry))]
+#[tracing::instrument("Customer signup", skip(request, app_state))]
 #[utoipa::path(post, path="/signup", responses((status=200, body=StdResponse, description="User created successfully"), (status=409, description="User already exists")))]
 pub async fn customer_signup(
-    pool: web::Data<PgPool>,
-    request: web::Json<UserCreateRequest>,
-    secret_key: web::Data<SecretKey>,
-    expiry: web::Data<Expiration>,
+    app_state: web::Data<AppState>,
+    request: web::Json<UserRegisterRequest>,
 ) -> actix_web::Result<HttpResponse> {
-    let user: CustomerUser = request.into_inner().try_into().to_badrequest()?;
-    let user = user.0;
+    let user_service = UserService::from(&app_state);
 
-    // Check if a user is age > 18
-    let age_days = (Utc::now().date_naive() - user.date_of_birth).num_days();
-    if age_days < 18 * 365 {
-        return Ok(HttpResponse::BadRequest().json(StdResponse::from("You need to be 18 or older to use this service. Please try again when you meet the age requirement.")));
-    }
-
-    let mut tx = pool.begin().await.to_internal()?;
-    db_create_user(&mut tx, &user).await.to_internal()?;
-
-    // Create activate token
-    let activate_token = create_activate_token(
-        user.id,
-        user.email.as_ref(),
-        expiry.into_inner().access_token_expire_secs,
-        &secret_key.into_inner().0,
-        AccessLevel::Customer,
-    )
-    .to_internal()?;
-
-    db_store_token(&mut tx, &activate_token, user.id, user.email.as_ref())
-        .await
-        .to_internal()?;
-
-    tracing::info!("User activate token generated and stored");
-
-    tx.commit().await.to_internal()?;
-
-    // TODO Send Activate Link
+    user_service.create_user(request.into_inner()).await?;
 
     Ok(HttpResponse::Ok().json(StdResponse::from("Profile successfully created")))
 }
@@ -68,97 +27,37 @@ pub async fn customer_signup(
 #[tracing::instrument("Confirm profile")]
 #[utoipa::path(get, path="/customer/confirm/{token}", responses((status=200, body=StdResponse, description="User activated successfully"), (status=409, description="User activation failed")))]
 pub async fn confirm_customer(
-    pool: web::Data<PgPool>,
+    app_state: web::Data<AppState>,
     req: web::Path<String>,
-    secret_key: web::Data<SecretKey>,
 ) -> actix_web::Result<HttpResponse> {
-    let (user_email, _, _) =
-        validate_activate_token(&req.into_inner(), &secret_key.into_inner().0).to_internal()?;
+    let auth_service = AuthService::from(&app_state);
 
-    db_confirm_user(&pool, &user_email).await.to_internal()?;
+    auth_service.verify_user_email(req.into_inner()).await?;
 
     Ok(HttpResponse::Ok().json(StdResponse::from("Successful activation")))
 }
 
-#[tracing::instrument("Customer login", skip(payload, pool, session, default_pass))]
+#[tracing::instrument("Customer login", skip(app_state, session))]
 #[utoipa::path(post, path="/login", responses((status=200, body=StdResponse, description="Customer login successful"), (status=401, description="Customer login unsuccessful")))]
 pub async fn customer_login(
-    pool: web::Data<PgPool>,
-    secret_key: web::Data<SecretKey>,
-    default_pass: web::Data<DefaultPassword>,
-    expiration: web::Data<Expiration>,
+    app_state: web::Data<AppState>,
     payload: web::Json<LoginRequest>,
     session: CustomerSession,
 ) -> actix_web::Result<HttpResponse> {
-    let secret_key = &secret_key.into_inner().0;
+    let auth_service = AuthService::from(&app_state);
 
-    if payload.non_empty_email_username() {
-        return Ok(HttpResponse::BadRequest().json(StdResponse::from("Email/Username is empty")));
-    }
+    let (access_token, refresh_token) = auth_service
+        .authenticate_user(payload.into_inner(), session)
+        .await?;
 
-    let credentials =
-        Credentials::from(payload.into_inner(), &default_pass.into_inner().0).to_badrequest()?;
-
-    match validate_credentials(&pool, credentials).await {
-        Ok((customer_id, username)) => {
-            tracing::Span::current().record("customer_id", tracing::field::display(customer_id));
-
-            let user_session = SessionMetadata::new(
-                customer_id,
-                expiration.session_expiration,
-                &username,
-                AccessLevel::Customer,
-            )
-            .map_err(|e| e.current_context().clone())?;
-
-            session.renew();
-
-            session
-                .insert_sesh_user(user_session)
-                .map_err(|_| BaseError::internal())?;
-
-            FlashMessage::success("Customer Authorized").send();
-
-            let access_token = create_token(
-                customer_id,
-                &username,
-                AccessLevel::Customer,
-                expiration.access_token_expire_secs,
-                secret_key,
-            )
-            .to_internal()?;
-
-            let refresh_token = create_token(
-                customer_id,
-                &username,
-                AccessLevel::Customer,
-                expiration.refresh_token_expire_secs,
-                secret_key,
-            )
-            .to_internal()?;
-
-            Ok(HttpResponse::Ok()
-                .insert_header((header::AUTHORIZATION, format!("Bearer {}", access_token)))
-                .cookie(
-                    Cookie::build("refresh_token", refresh_token)
-                        .http_only(true)
-                        .finish(),
-                )
-                .json(StdResponse::from("Customer Login Successful")))
-        }
-
-        Err(e) => match e.current_context() {
-            BaseError::InvalidCredentials { message } => {
-                FlashMessage::info(format!("Customer login unsuccessful: {}", message)).send();
-                Ok(HttpResponse::Unauthorized().json(StdResponse::from(message)))
-            }
-            _ => {
-                FlashMessage::error("Internal Server Error").send();
-                Ok(HttpResponse::InternalServerError()
-                    .json(StdResponse::from("Internal Server Error")))
-            }
-        },
-    }
+    Ok(HttpResponse::Ok()
+        .insert_header((header::AUTHORIZATION, format!("Bearer {}", access_token)))
+        .cookie(
+            Cookie::build("refresh_token", refresh_token)
+                .http_only(true)
+                .finish(),
+        )
+        .json(StdResponse::from("Customer Login Successful")))
 }
 
 // KYC
@@ -171,17 +70,19 @@ pub async fn upload_user_docs() {}
 #[utoipa::path(post, path="/user/{id}/kyc", responses((status=200, body=StdResponse, description="Successfull verification"), (status=409, description="Verification failed")))]
 pub async fn customer_profile_status() {}
 
-#[tracing::instrument("Fetch balance", skip(pool))]
+#[tracing::instrument("Fetch balance", skip(app_state))]
 #[utoipa::path(get, path="/balance/{account_id}", responses((status=200, body=UserAccountBalance, description="Successfull balance check"), (status=409, description="Failed balance check")))]
 pub async fn fetch_balances(
-    pool: web::Data<PgPool>,
+    app_state: web::Data<AppState>,
     account_id: web::Path<Uuid>,
 ) -> actix_web::Result<HttpResponse> {
-    let account_id = account_id.into_inner();
-    let response = db_get_balance_by_user_account_id(&pool, account_id)
-        .await
-        .to_internal()?;
-    Ok(HttpResponse::Ok().json(response))
+    let account_service = AccountService::from(&app_state);
+
+    let result = account_service
+        .read_acc_balance(account_id.into_inner())
+        .await?;
+
+    Ok(HttpResponse::Ok().json(result))
 }
 
 pub async fn fetch_transactions() {}
